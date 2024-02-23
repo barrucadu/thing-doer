@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+  "placeholder"
+]
+
+resolver = "2"

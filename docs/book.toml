@@ -1,0 +1,17 @@
+[book]
+title = "thing-doer"
+authors = ["Michael Walker (barrucadu)"]
+description = "A simple container orchestrator."
+language = "en"
+multilingual = false
+
+[build]
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/barrucadu/thing-doer"
+cname = "thing-doer.docs.barrucadu.co.uk"
+
+[preprocessor.admonish]
+on_failure = "bail"
+command = "mdbook-admonish"
