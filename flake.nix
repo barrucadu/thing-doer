@@ -14,28 +14,33 @@
         inherit system;
         overlays = [ rust-overlay.overlays.default ];
       };
-      rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      buildDeps = with pkgs; [
+        coreutils
+        clang
+        protobuf
+        (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+      ];
     in
     {
       apps.${system} =
         let
-          mkApp = script: path: {
+          mkApp = script: extraDeps: {
             type = "app";
             program = toString (pkgs.writeShellScript "script.sh" ''
-              PATH=${pkgs.lib.makeBinPath ([ rust-toolchain ] ++ path)}
+              PATH=${pkgs.lib.makeBinPath (buildDeps ++ extraDeps)}
               ${pkgs.lib.fileContents script}
             '');
           };
         in
         {
           clippy = mkApp ./scripts/clippy.sh [ ];
-          documentation = mkApp ./scripts/documentation.sh (with pkgs; [ coreutils gnused mdbook mdbook-admonish ]);
+          documentation = mkApp ./scripts/documentation.sh (with pkgs; [ gnused mdbook mdbook-admonish ]);
           fmt = mkApp ./scripts/fmt.sh (with pkgs; [ git nix ]);
-          test = mkApp ./scripts/test.sh (with pkgs; [ coreutils clang ]);
+          test = mkApp ./scripts/test.sh [ ];
         };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = [ rust-toolchain ];
+        packages = buildDeps;
       };
 
       formatter.${system} = pkgs.nixpkgs-fmt;

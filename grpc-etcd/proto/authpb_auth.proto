@@ -1,0 +1,40 @@
+///////////////////////////////////////////////////////////////////////////////
+// NOTICE:
+// This is derived from https://github.com/etcd-io/etcd/blob/2e7ed80be246380fc50ca46aa193348a28935380/api/authpb/auth.proto
+// Which is under the terms of the Apache License: https://github.com/etcd-io/etcd/blob/2e7ed80be246380fc50ca46aa193348a28935380/api/LICENSE
+///////////////////////////////////////////////////////////////////////////////
+
+syntax = "proto3";
+package authpb;
+
+message UserAddOptions {
+  bool no_password = 1;
+};
+
+// User is a single entry in the bucket authUsers
+message User {
+  bytes name = 1;
+  bytes password = 2;
+  repeated string roles = 3;
+  UserAddOptions options = 4;
+}
+
+// Permission is a single entity
+message Permission {
+  enum Type {
+    READ = 0;
+    WRITE = 1;
+    READWRITE = 2;
+  }
+  Type permType = 1;
+
+  bytes key = 2;
+  bytes range_end = 3;
+}
+
+// Role is a single entry in the bucket authRoles
+message Role {
+  bytes name = 1;
+
+  repeated Permission keyPermission = 2;
+}
