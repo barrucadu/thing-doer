@@ -2,6 +2,7 @@
 
 members = [
   "grpc-etcd",
+  "supervisord",
   "placeholder"
 ]
 
