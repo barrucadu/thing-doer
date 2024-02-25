@@ -1,5 +1,3 @@
-use grpc_etcd::etcdserverpb::kv_client::KvClient;
-use grpc_etcd::etcdserverpb::lease_client::LeaseClient;
 use grpc_etcd::etcdserverpb::range_request::{SortOrder, SortTarget};
 use grpc_etcd::etcdserverpb::request_op::Request::RequestPut;
 use grpc_etcd::etcdserverpb::{
@@ -12,7 +10,6 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::time::timeout;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 
 use crate::args::EtcdConfig;
@@ -185,22 +182,17 @@ pub async fn establish_leases(
     etcd_config: &EtcdConfig,
     name: &str,
 ) -> Result<(Lease, Lease), Error> {
-    let mut kv_client = etcd_config.kv_client().await?;
-    let mut lease_client = etcd_config.lease_client().await?;
-
     let healthy_lease = establish_lease(
-        &mut kv_client,
-        &mut lease_client,
+        etcd_config,
         HEALTHY_LEASE_TTL,
-        format!("node/{name}/healthy"),
+        healthy_lease_key(etcd_config, name),
     )
     .await?;
 
     let alive_lease = establish_lease(
-        &mut kv_client,
-        &mut lease_client,
+        etcd_config,
         ALIVE_LEASE_TTL,
-        format!("node/{name}/alive"),
+        alive_lease_key(etcd_config, name),
     )
     .await?;
 
@@ -213,16 +205,7 @@ pub async fn reestablish_lease(
     etcd_config: &EtcdConfig,
     old_lease: &Lease,
 ) -> Result<Lease, Error> {
-    let mut kv_client = etcd_config.kv_client().await?;
-    let mut lease_client = etcd_config.lease_client().await?;
-
-    establish_lease(
-        &mut kv_client,
-        &mut lease_client,
-        old_lease.requested_ttl,
-        old_lease.key.clone(),
-    )
-    .await
+    establish_lease(etcd_config, old_lease.requested_ttl, old_lease.key.clone()).await
 }
 
 /// Look up an existing lease's key by ID.
@@ -234,7 +217,7 @@ pub async fn lookup_lease(
 
     let response = kv_client
         .range(Request::new(RangeRequest {
-            key: format!("lease/{}", lease_id.0).into(),
+            key: lease_reverse_key(etcd_config, lease_id).into(),
             range_end: [].into(),
             limit: 1,
             revision: 0,
@@ -262,16 +245,15 @@ pub async fn lookup_lease(
 
 /// Create a lease and associate a key with it.  The value of the key is
 /// unimportant.
-async fn establish_lease(
-    kv_client: &mut KvClient<Channel>,
-    lease_client: &mut LeaseClient<Channel>,
-    ttl: i64,
-    key: String,
-) -> Result<Lease, Error> {
+async fn establish_lease(etcd_config: &EtcdConfig, ttl: i64, key: String) -> Result<Lease, Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    let mut lease_client = etcd_config.lease_client().await?;
+
     let grant = lease_client
         .lease_grant(Request::new(LeaseGrantRequest { id: 0, ttl }))
         .await?
         .into_inner();
+    let id = LeaseId(grant.id);
 
     if !grant.error.is_empty() {
         return Err(Error::EtcdResponse(grant.error));
@@ -286,7 +268,7 @@ async fn establish_lease(
         ignore_lease: false,
     };
     let put_lease_key = PutRequest {
-        key: format!("lease/{}", grant.id).into(),
+        key: lease_reverse_key(etcd_config, id).into(),
         value: key.clone().into(),
         lease: grant.id,
         prev_kv: false,
@@ -311,8 +293,27 @@ async fn establish_lease(
 
     Ok(Lease {
         key,
-        id: LeaseId(grant.id),
+        id,
         actual_ttl: grant.ttl,
         requested_ttl: ttl,
     })
+}
+
+/// The key to use for a node's "healthy" lease.
+fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+    format!("{prefix}/node/{name}/healthy", prefix = etcd_config.prefix)
+}
+
+/// The key to use for a node's "alive" lease.
+fn alive_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+    format!("{prefix}/node/{name}/alive", prefix = etcd_config.prefix)
+}
+
+/// The key to use for a lease-to-key lookup key.
+fn lease_reverse_key(etcd_config: &EtcdConfig, lease_id: LeaseId) -> String {
+    format!(
+        "{prefix}/lease/{id}",
+        prefix = etcd_config.prefix,
+        id = lease_id.0
+    )
 }

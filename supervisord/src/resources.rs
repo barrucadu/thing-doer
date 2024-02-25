@@ -46,7 +46,7 @@ async fn put_unchecked(
 
     kv_client
         .put(Request::new(PutRequest {
-            key: format!("resource/{res_type}/{res_name}").into(),
+            key: resource_key(etcd_config, res_type, res_name).into(),
             value: json.to_string().into(),
             lease: 0,
             prev_kv: false,
@@ -67,4 +67,12 @@ fn validate_name(name: &str) -> bool {
         && name.chars().all(valid_character)
         && name.starts_with(|c: char| c.is_ascii_alphabetic())
         && !name.ends_with(|c: char| c == '-')
+}
+
+/// The key to use for a resource.
+fn resource_key(etcd_config: &EtcdConfig, res_type: &str, res_name: &str) -> String {
+    format!(
+        "{prefix}/resource/{res_type}/{res_name}",
+        prefix = etcd_config.prefix
+    )
 }

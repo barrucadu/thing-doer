@@ -33,21 +33,25 @@ pub struct EtcdConfig {
         default_value = "127.0.0.1:2379",
         env = "ETCD_HOSTS"
     )]
-    pub etcd_hosts: Vec<SocketAddr>,
+    pub hosts: Vec<SocketAddr>,
 
     /// Timeout (in seconds) for connecting to etcd
     #[clap(long, value_parser = |secs: &str| secs.parse().map(Duration::from_secs), default_value="2", env="ETCD_CONNECT_TIMEOUT")]
-    pub etcd_connect_timeout: Duration,
+    pub connect_timeout: Duration,
+
+    /// Prefix to store keys under in etcd.
+    #[clap(long, default_value = "/thing-doer", env = "ETCD_PREFIX")]
+    pub prefix: String,
 }
 
 impl EtcdConfig {
     /// Connect to etcd by trying each host in turn
     pub async fn connect(&self) -> Result<transport::Channel, transport::Error> {
-        let mut iter = self.etcd_hosts.iter().peekable();
+        let mut iter = self.hosts.iter().peekable();
         while let Some(addr) = iter.next() {
             match transport::Endpoint::new(format!("http://{addr}")) {
                 Ok(endpoint) => match endpoint
-                    .connect_timeout(self.etcd_connect_timeout)
+                    .connect_timeout(self.connect_timeout)
                     .connect()
                     .await
                 {
@@ -70,7 +74,7 @@ impl EtcdConfig {
             }
         }
 
-        // `self.etcd_hosts` is guaranteed to be nonempty
+        // `self.hosts` is guaranteed to be nonempty
         unreachable!();
     }
 
