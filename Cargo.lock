@@ -367,6 +367,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "grpc-supervisord"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -944,6 +953,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "grpc-etcd",
+ "grpc-supervisord",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -1400,3 +1410,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0770833d60a970638e989b3fa9fd2bb1aaadcf88963d1659fd7d9990196ed2d6"
+
+[[package]]
+name = "workerd"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "grpc-supervisord",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]

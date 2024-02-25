@@ -1,6 +1,7 @@
 pub mod args;
 pub mod heartbeat;
 pub mod resources;
+pub mod services;
 
 /// Exit code in case the heartbeat process loses connection to etcd and cannot
 /// reestablish it.
@@ -10,6 +11,7 @@ pub static EXIT_CODE_HEARTBEAT_FAILED: i32 = 3;
 #[derive(Debug)]
 pub enum Error {
     EtcdResponse(String),
+    FromUtf8(std::string::FromUtf8Error),
     Resource(ResourceError),
     Streaming(StreamingError),
     TonicStatus(tonic::Status),
@@ -20,6 +22,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::EtcdResponse(s) => write!(f, "etcd response: {s}"),
+            Error::FromUtf8(s) => write!(f, "from utf8: {s}"),
             Error::Resource(s) => write!(f, "resource: {s:?}"),
             Error::Streaming(s) => write!(f, "streaming: {s:?}"),
             Error::TonicStatus(s) => write!(f, "tonic status: {s}"),
@@ -29,6 +32,12 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(error: std::string::FromUtf8Error) -> Self {
+        Self::FromUtf8(error)
+    }
+}
 
 impl From<ResourceError> for Error {
     fn from(error: ResourceError) -> Self {

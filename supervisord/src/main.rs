@@ -4,6 +4,7 @@ use serde_json::json;
 use supervisord::args::Args;
 use supervisord::heartbeat;
 use supervisord::resources;
+use supervisord::services;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         heartbeat::establish_leases(&args.etcd_config, &args.name).await?;
 
     tokio::spawn(heartbeat::task(args.etcd_config.clone(), healthy_lease));
-    heartbeat::task(args.etcd_config, alive_lease).await;
+    tokio::spawn(heartbeat::task(args.etcd_config.clone(), alive_lease));
+
+    services::task(args.etcd_config, args.listen_address).await?;
 
     Ok(())
 }
