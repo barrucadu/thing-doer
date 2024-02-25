@@ -1,4 +1,3 @@
-use grpc_etcd::etcdserverpb::range_request::{SortOrder, SortTarget};
 use grpc_etcd::etcdserverpb::request_op::Request::RequestPut;
 use grpc_etcd::etcdserverpb::{
     LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest, RangeRequest,
@@ -218,18 +217,8 @@ pub async fn lookup_lease(
     let response = kv_client
         .range(Request::new(RangeRequest {
             key: lease_reverse_key(etcd_config, lease_id).into(),
-            range_end: [].into(),
             limit: 1,
-            revision: 0,
-            sort_order: SortOrder::None.into(),
-            sort_target: SortTarget::Key.into(),
-            serializable: false,
-            keys_only: false,
-            count_only: false,
-            min_mod_revision: 0,
-            max_mod_revision: 0,
-            min_create_revision: 0,
-            max_create_revision: 0,
+            ..Default::default()
         }))
         .await?
         .into_inner();
@@ -263,17 +252,13 @@ async fn establish_lease(etcd_config: &EtcdConfig, ttl: i64, key: String) -> Res
         key: key.clone().into(),
         value: grant.id.to_be_bytes().into(),
         lease: grant.id,
-        prev_kv: false,
-        ignore_value: false,
-        ignore_lease: false,
+        ..Default::default()
     };
     let put_lease_key = PutRequest {
         key: lease_reverse_key(etcd_config, id).into(),
         value: key.clone().into(),
         lease: grant.id,
-        prev_kv: false,
-        ignore_value: false,
-        ignore_lease: false,
+        ..Default::default()
     };
     kv_client
         .txn(Request::new(TxnRequest {

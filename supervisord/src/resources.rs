@@ -48,10 +48,7 @@ async fn put_unchecked(
         .put(Request::new(PutRequest {
             key: resource_key(etcd_config, res_type, res_name).into(),
             value: json.to_string().into(),
-            lease: 0,
-            prev_kv: false,
-            ignore_value: false,
-            ignore_lease: false,
+            ..Default::default()
         }))
         .await?;
 
