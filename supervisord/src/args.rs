@@ -1,4 +1,6 @@
-use grpc_etcd::etcdserverpb::{kv_client::KvClient, lease_client::LeaseClient};
+use grpc_etcd::etcdserverpb::{
+    kv_client::KvClient, lease_client::LeaseClient, watch_client::WatchClient,
+};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tonic::transport;
@@ -88,5 +90,11 @@ impl EtcdConfig {
     pub async fn lease_client(&self) -> Result<LeaseClient<transport::Channel>, transport::Error> {
         let conn = self.connect().await?;
         Ok(LeaseClient::new(conn))
+    }
+
+    /// Obtain a watch client by trying each etcd host in turn.
+    pub async fn watch_client(&self) -> Result<WatchClient<transport::Channel>, transport::Error> {
+        let conn = self.connect().await?;
+        Ok(WatchClient::new(conn))
     }
 }

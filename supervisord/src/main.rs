@@ -5,12 +5,15 @@ use supervisord::args::Args;
 use supervisord::heartbeat;
 use supervisord::resources;
 use supervisord::services;
+use supervisord::state;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let args = Args::parse();
+
+    state::initialise(args.etcd_config.clone()).await?;
 
     let spec = json!({
         "type": "node.supervisor",
