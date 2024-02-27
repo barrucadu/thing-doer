@@ -85,15 +85,21 @@ impl InnerState {
         } else if let Some((_, name)) =
             key.split_once(&format!("{etcd_prefix}/resource/node.supervisor/"))
         {
-            let address = address_from_node_json(kv.value);
-            tracing::info!(name, ?address, "found supervisor node");
-            self.supervisor_nodes.insert(name.to_owned(), address);
+            if let Some(address) = address_from_node_json(kv.value) {
+                tracing::info!(name, ?address, "found supervisor node");
+                self.supervisor_nodes.insert(name.to_owned(), address);
+            } else {
+                tracing::warn!(name, "could not parse supervisor node definition");
+            }
         } else if let Some((_, name)) =
             key.split_once(&format!("{etcd_prefix}/resource/node.worker/"))
         {
-            let address = address_from_node_json(kv.value);
-            tracing::info!(name, ?address, "found worker node");
-            self.supervisor_nodes.insert(name.to_owned(), address);
+            if let Some(address) = address_from_node_json(kv.value) {
+                tracing::info!(name, ?address, "found worker node");
+                self.supervisor_nodes.insert(name.to_owned(), address);
+            } else {
+                tracing::warn!(name, "could not parse worker node definition");
+            }
         } else {
             tracing::warn!(?key, "unexpected watch key");
         }
@@ -109,12 +115,18 @@ pub struct NodeState {
 }
 
 /// Parse a value as node JSON and extract the address field.
-fn address_from_node_json(bytes: Vec<u8>) -> SocketAddr {
-    let json = String::from_utf8(bytes).unwrap();
-    let value: Value = serde_json::from_str(&json).unwrap();
-    let parsed = value["spec"]["address"].as_str().unwrap().parse();
+fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
+    if let Ok(json) = String::from_utf8(bytes) {
+        if let Ok(value) = serde_json::from_str::<Value>(&json) {
+            if let Some(address_str) = value["spec"]["address"].as_str() {
+                if let Ok(address) = address_str.parse() {
+                    return Some(address);
+                }
+            }
+        }
+    }
 
-    parsed.unwrap()
+    None
 }
 
 ///////////////////////////////////////////////////////////////////////////////
