@@ -2,6 +2,7 @@ use clap::Parser;
 use serde_json::json;
 
 use supervisord::args::Args;
+use supervisord::etcd::leaser;
 use supervisord::heartbeat;
 use supervisord::resources;
 use supervisord::services;
@@ -26,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (healthy_lease, alive_lease) =
         heartbeat::establish_leases(&args.etcd_config, &args.name).await?;
 
-    tokio::spawn(heartbeat::task(args.etcd_config.clone(), healthy_lease));
-    tokio::spawn(heartbeat::task(args.etcd_config.clone(), alive_lease));
+    tokio::spawn(leaser::task(args.etcd_config.clone(), healthy_lease));
+    tokio::spawn(leaser::task(args.etcd_config.clone(), alive_lease));
 
     services::task(args.etcd_config, args.listen_address).await?;
 

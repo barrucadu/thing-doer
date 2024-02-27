@@ -6,6 +6,7 @@ use serde_json::json;
 use tonic::{Request, Response, Status};
 
 use crate::args::EtcdConfig;
+use crate::etcd::leaser;
 use crate::heartbeat;
 use crate::resources;
 use crate::{Error, ResourceError};
@@ -108,16 +109,16 @@ async fn handle_heartbeat(
         return Err(HandleHeartbeatError::WorkerId);
     }
 
-    let healthy_lease = heartbeat::Lease {
+    let healthy_lease = leaser::Lease {
         key: heartbeat::healthy_lease_key(etcd_config, &request.name),
-        id: heartbeat::LeaseId(request.worker_id[0]),
+        id: leaser::LeaseId(request.worker_id[0]),
         requested_ttl: heartbeat::HEALTHY_LEASE_TTL,
         actual_ttl: heartbeat::HEALTHY_LEASE_TTL,
     };
 
-    let alive_lease = heartbeat::Lease {
+    let alive_lease = leaser::Lease {
         key: heartbeat::alive_lease_key(etcd_config, &request.name),
-        id: heartbeat::LeaseId(request.worker_id[1]),
+        id: leaser::LeaseId(request.worker_id[1]),
         requested_ttl: heartbeat::ALIVE_LEASE_TTL,
         actual_ttl: heartbeat::ALIVE_LEASE_TTL,
     };
@@ -136,7 +137,7 @@ async fn handle_heartbeat(
         })
     } else {
         // healthy lease expired and must be recreated
-        let new_healthy_lease = heartbeat::reestablish_lease(etcd_config, &healthy_lease).await?;
+        let new_healthy_lease = leaser::reestablish_lease(etcd_config, &healthy_lease).await?;
         Ok(HeartbeatResponse {
             worker_id: [new_healthy_lease.id.0, alive_lease.id.0].into(),
             heartbeat_ttl: HEARTBEAT_TTL,
@@ -148,14 +149,14 @@ async fn handle_heartbeat(
 /// success.
 async fn check_and_renew_lease(
     etcd_config: &EtcdConfig,
-    lease: &heartbeat::Lease,
+    lease: &leaser::Lease,
 ) -> Result<bool, Error> {
     // unfortunately, we can't check the lease still exists and also renew it in
     // the same transaction, so we need to check, renew, and then check that it
     // didn't elapse between the first two steps.
-    if heartbeat::is_lease_still_active(etcd_config, lease).await? {
-        let _ = heartbeat::ping_and_wait_for_pong(etcd_config, lease).await?;
-        let res = heartbeat::is_lease_still_active(etcd_config, lease).await?;
+    if leaser::is_lease_still_active(etcd_config, lease).await? {
+        let _ = leaser::ping_and_wait_for_pong(etcd_config, lease).await?;
+        let res = leaser::is_lease_still_active(etcd_config, lease).await?;
         Ok(res)
     } else {
         Ok(false)

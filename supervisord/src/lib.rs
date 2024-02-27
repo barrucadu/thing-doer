@@ -5,10 +5,6 @@ pub mod resources;
 pub mod services;
 pub mod state;
 
-/// Exit code in case the heartbeat process loses connection to etcd and cannot
-/// reestablish it.
-pub static EXIT_CODE_HEARTBEAT_FAILED: i32 = 3;
-
 /// Generic error type
 #[derive(Debug)]
 pub enum Error {
