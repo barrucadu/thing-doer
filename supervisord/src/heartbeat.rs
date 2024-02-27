@@ -1,8 +1,3 @@
-use grpc_etcd::etcdserverpb::request_op::Request::RequestPut;
-use grpc_etcd::etcdserverpb::{
-    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest, RangeRequest,
-    RequestOp, TxnRequest,
-};
 use std::process;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -12,6 +7,11 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::args::EtcdConfig;
+use crate::etcd::pb::etcdserverpb::request_op::Request::RequestPut;
+use crate::etcd::pb::etcdserverpb::{
+    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest, RangeRequest,
+    RequestOp, TxnRequest,
+};
 use crate::{Error, StreamingError};
 
 /// If this time elapses without a heartbeat, this instance enters "unhealthy"

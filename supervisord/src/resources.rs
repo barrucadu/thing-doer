@@ -1,8 +1,8 @@
-use grpc_etcd::etcdserverpb::PutRequest;
 use serde_json::Value;
 use tonic::Request;
 
 use crate::args::EtcdConfig;
+use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::{Error, ResourceError};
 
 /// Persist a new resource to etcd.

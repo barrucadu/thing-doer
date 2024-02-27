@@ -1,4 +1,5 @@
 pub mod args;
+pub mod etcd;
 pub mod heartbeat;
 pub mod resources;
 pub mod services;

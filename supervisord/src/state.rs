@@ -1,7 +1,3 @@
-use grpc_etcd::etcdserverpb::range_request::{SortOrder, SortTarget};
-use grpc_etcd::etcdserverpb::watch_request::RequestUnion;
-use grpc_etcd::etcdserverpb::{RangeRequest, WatchCreateRequest, WatchRequest, WatchResponse};
-use grpc_etcd::mvccpb::{event::EventType, Event};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -15,6 +11,12 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::args::EtcdConfig;
+use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
+use crate::etcd::pb::etcdserverpb::watch_request::RequestUnion;
+use crate::etcd::pb::etcdserverpb::{
+    RangeRequest, WatchCreateRequest, WatchRequest, WatchResponse,
+};
+use crate::etcd::pb::mvccpb::{event::EventType, Event};
 use crate::{Error, StreamingError};
 
 /// A handle to the shared state.
