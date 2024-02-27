@@ -12,8 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let args = Args::parse();
-
-    state::initialise(args.etcd_config.clone()).await?;
+    let _state = state::State::initialise(args.etcd_config.clone()).await?;
 
     let spec = json!({
         "type": "node.supervisor",

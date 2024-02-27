@@ -9,10 +9,6 @@ pub mod state;
 /// reestablish it.
 pub static EXIT_CODE_HEARTBEAT_FAILED: i32 = 3;
 
-/// Exit code in case the watch process loses connection to etcd and cannot
-/// reestablish the watch.
-pub static EXIT_CODE_WATCH_FAILED: i32 = 4;
-
 /// Generic error type
 #[derive(Debug)]
 pub enum Error {
