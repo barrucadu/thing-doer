@@ -11,7 +11,8 @@ message RegisterResponse {
 }
 
 message HeartbeatRequest {
-  repeated int64 worker_id = 1;
+  string name = 1;
+  repeated int64 worker_id = 2;
 }
 message HeartbeatResponse {
   repeated int64 worker_id = 1;

@@ -7,10 +7,8 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::args::EtcdConfig;
-use crate::etcd::pb::etcdserverpb::request_op::Request::RequestPut;
 use crate::etcd::pb::etcdserverpb::{
     LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest, RangeRequest,
-    RequestOp, TxnRequest,
 };
 use crate::{Error, StreamingError};
 
@@ -207,29 +205,20 @@ pub async fn reestablish_lease(
     establish_lease(etcd_config, old_lease.requested_ttl, old_lease.key.clone()).await
 }
 
-/// Look up an existing lease's key by ID.
-pub async fn lookup_lease(
-    etcd_config: &EtcdConfig,
-    lease_id: LeaseId,
-) -> Result<Option<String>, Error> {
+/// Check if a key is still owned by a lease.
+pub async fn is_lease_still_active(etcd_config: &EtcdConfig, lease: &Lease) -> Result<bool, Error> {
     let mut kv_client = etcd_config.kv_client().await?;
 
     let response = kv_client
         .range(Request::new(RangeRequest {
-            key: lease_reverse_key(etcd_config, lease_id).into(),
+            key: lease.key.clone().into(),
             limit: 1,
             ..Default::default()
         }))
         .await?
         .into_inner();
 
-    if response.count == 1 {
-        let key = &response.kvs[0].key;
-        let s = String::from_utf8(key.clone())?;
-        Ok(Some(s))
-    } else {
-        Ok(None)
-    }
+    Ok(response.count == 1 && response.kvs[0].lease == lease.id.0)
 }
 
 /// Create a lease and associate a key with it.  The value of the key is
@@ -248,31 +237,12 @@ async fn establish_lease(etcd_config: &EtcdConfig, ttl: i64, key: String) -> Res
         return Err(Error::EtcdResponse(grant.error));
     }
 
-    let put_node_key = PutRequest {
-        key: key.clone().into(),
-        value: grant.id.to_be_bytes().into(),
-        lease: grant.id,
-        ..Default::default()
-    };
-    let put_lease_key = PutRequest {
-        key: lease_reverse_key(etcd_config, id).into(),
-        value: key.clone().into(),
-        lease: grant.id,
-        ..Default::default()
-    };
     kv_client
-        .txn(Request::new(TxnRequest {
-            compare: [].into(),
-            success: [
-                RequestOp {
-                    request: Some(RequestPut(put_node_key)),
-                },
-                RequestOp {
-                    request: Some(RequestPut(put_lease_key)),
-                },
-            ]
-            .into(),
-            failure: [].into(),
+        .put(Request::new(PutRequest {
+            key: key.clone().into(),
+            value: b"lease-established".into(),
+            lease: grant.id,
+            ..Default::default()
         }))
         .await?;
 
@@ -285,7 +255,7 @@ async fn establish_lease(etcd_config: &EtcdConfig, ttl: i64, key: String) -> Res
 }
 
 /// The key to use for a node's "healthy" lease.
-fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+pub fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
     format!(
         "{prefix}/node/heartbeat/healthy/{name}",
         prefix = etcd_config.prefix
@@ -293,18 +263,9 @@ fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
 }
 
 /// The key to use for a node's "alive" lease.
-fn alive_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+pub fn alive_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
     format!(
         "{prefix}/node/heartbeat/alive/{name}",
         prefix = etcd_config.prefix
-    )
-}
-
-/// The key to use for a lease-to-key lookup key.
-fn lease_reverse_key(etcd_config: &EtcdConfig, lease_id: LeaseId) -> String {
-    format!(
-        "{prefix}/lease/{id}",
-        prefix = etcd_config.prefix,
-        id = lease_id.0
     )
 }

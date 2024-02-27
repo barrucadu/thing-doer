@@ -6,15 +6,12 @@ use serde_json::json;
 use tonic::{Request, Response, Status};
 
 use crate::args::EtcdConfig;
-use crate::heartbeat::{
-    establish_leases, lookup_lease, ping_and_wait_for_pong, reestablish_lease, Lease, LeaseId,
-    ALIVE_LEASE_TTL, HEALTHY_LEASE_TTL,
-};
+use crate::heartbeat;
 use crate::resources;
 use crate::{Error, ResourceError};
 
 /// Worker heartbeat TTL.
-pub static HEARTBEAT_TTL: i64 = HEALTHY_LEASE_TTL - 5;
+pub static HEARTBEAT_TTL: i64 = heartbeat::HEALTHY_LEASE_TTL - 5;
 
 /// A server for the worker gRPC service.
 #[derive(Debug)]
@@ -81,7 +78,8 @@ async fn handle_register(
     });
     resources::put(etcd_config, spec).await?;
 
-    let (healthy_lease, alive_lease) = establish_leases(etcd_config, &request.name).await?;
+    let (healthy_lease, alive_lease) =
+        heartbeat::establish_leases(etcd_config, &request.name).await?;
 
     Ok(RegisterResponse {
         worker_id: [healthy_lease.id.0, alive_lease.id.0].into(),
@@ -110,46 +108,39 @@ async fn handle_heartbeat(
         return Err(HandleHeartbeatError::WorkerId);
     }
 
-    let healthy_lease_id = LeaseId(request.worker_id[0]);
-    let alive_lease_id = LeaseId(request.worker_id[1]);
+    let healthy_lease = heartbeat::Lease {
+        key: heartbeat::healthy_lease_key(etcd_config, &request.name),
+        id: heartbeat::LeaseId(request.worker_id[0]),
+        requested_ttl: heartbeat::HEALTHY_LEASE_TTL,
+        actual_ttl: heartbeat::HEALTHY_LEASE_TTL,
+    };
 
-    if let Some(alive_lease_key) =
-        check_and_renew_lease(etcd_config, alive_lease_id, ALIVE_LEASE_TTL).await?
-    {
-        tracing::info!(
-            lease_key = alive_lease_key,
-            "got heartbeat from live worker"
-        );
-        if check_and_renew_lease(etcd_config, healthy_lease_id, HEALTHY_LEASE_TTL)
-            .await?
-            .is_some()
-        {
-            // both leases were still valid
-            Ok(HeartbeatResponse {
-                worker_id: [healthy_lease_id.0, alive_lease_id.0].into(),
-                heartbeat_ttl: HEARTBEAT_TTL,
-            })
-        } else {
-            // healthy lease expired and must be recreated
-            let healthy_lease = reestablish_lease(
-                etcd_config,
-                &Lease {
-                    key: alive_lease_key.replace("/alive/", "/healthy/"),
-                    id: healthy_lease_id,
-                    actual_ttl: HEALTHY_LEASE_TTL,
-                    requested_ttl: HEALTHY_LEASE_TTL,
-                },
-            )
-            .await?;
-            Ok(HeartbeatResponse {
-                worker_id: [healthy_lease.id.0, alive_lease_id.0].into(),
-                heartbeat_ttl: HEARTBEAT_TTL,
-            })
-        }
+    let alive_lease = heartbeat::Lease {
+        key: heartbeat::alive_lease_key(etcd_config, &request.name),
+        id: heartbeat::LeaseId(request.worker_id[1]),
+        requested_ttl: heartbeat::ALIVE_LEASE_TTL,
+        actual_ttl: heartbeat::ALIVE_LEASE_TTL,
+    };
+
+    if !check_and_renew_lease(etcd_config, &alive_lease).await? {
+        tracing::info!(name = request.name, "got heartbeat from dead worker");
+        return Err(HandleHeartbeatError::Expired);
+    }
+
+    tracing::info!(name = request.name, "got heartbeat from live worker");
+
+    if check_and_renew_lease(etcd_config, &healthy_lease).await? {
+        Ok(HeartbeatResponse {
+            worker_id: [healthy_lease.id.0, alive_lease.id.0].into(),
+            heartbeat_ttl: HEARTBEAT_TTL,
+        })
     } else {
-        // worker is considered dead
-        tracing::info!("got heartbeat from dead worker");
-        Err(HandleHeartbeatError::Expired)
+        // healthy lease expired and must be recreated
+        let new_healthy_lease = heartbeat::reestablish_lease(etcd_config, &healthy_lease).await?;
+        Ok(HeartbeatResponse {
+            worker_id: [new_healthy_lease.id.0, alive_lease.id.0].into(),
+            heartbeat_ttl: HEARTBEAT_TTL,
+        })
     }
 }
 
@@ -157,26 +148,16 @@ async fn handle_heartbeat(
 /// success.
 async fn check_and_renew_lease(
     etcd_config: &EtcdConfig,
-    lease_id: LeaseId,
-    ttl: i64,
-) -> Result<Option<String>, Error> {
+    lease: &heartbeat::Lease,
+) -> Result<bool, Error> {
     // unfortunately, we can't check the lease still exists and also renew it in
     // the same transaction, so we need to check, renew, and then check that it
     // didn't elapse between the first two steps.
-    if let Some(lease_key) = lookup_lease(etcd_config, lease_id).await? {
-        let _ = ping_and_wait_for_pong(
-            etcd_config,
-            &Lease {
-                key: lease_key,
-                id: lease_id,
-                actual_ttl: ttl,
-                requested_ttl: ttl,
-            },
-        )
-        .await?;
-        let res = lookup_lease(etcd_config, lease_id).await?;
+    if heartbeat::is_lease_still_active(etcd_config, lease).await? {
+        let _ = heartbeat::ping_and_wait_for_pong(etcd_config, lease).await?;
+        let res = heartbeat::is_lease_still_active(etcd_config, lease).await?;
         Ok(res)
     } else {
-        Ok(None)
+        Ok(false)
     }
 }

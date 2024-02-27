@@ -31,7 +31,10 @@ pub async fn task(
 
         tracing::info!("ping");
         let res = client
-            .heartbeat(Request::new(HeartbeatRequest { worker_id }))
+            .heartbeat(Request::new(HeartbeatRequest {
+                name: name.clone(),
+                worker_id,
+            }))
             .await?
             .into_inner();
         worker_id = res.worker_id;
