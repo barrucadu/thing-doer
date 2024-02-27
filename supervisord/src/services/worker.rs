@@ -116,7 +116,10 @@ async fn handle_heartbeat(
     if let Some(alive_lease_key) =
         check_and_renew_lease(etcd_config, alive_lease_id, ALIVE_LEASE_TTL).await?
     {
-        tracing::info!(name = alive_lease_key, "got heartbeat from live worker");
+        tracing::info!(
+            lease_key = alive_lease_key,
+            "got heartbeat from live worker"
+        );
         if check_and_renew_lease(etcd_config, healthy_lease_id, HEALTHY_LEASE_TTL)
             .await?
             .is_some()
