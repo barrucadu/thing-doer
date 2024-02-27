@@ -4,10 +4,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::etcd;
-use crate::etcd::pb::mvccpb::{event::EventType, Event};
-use crate::etcd::watcher;
-use crate::Error;
+use nodelib::etcd;
+use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
+use nodelib::etcd::watcher;
+use nodelib::Error;
 
 /// A handle to the shared state.
 #[derive(Debug, Clone)]
@@ -32,10 +32,6 @@ impl State {
                 prefix = etcd_config.prefix
             ),
             format!(
-                "{prefix}/resource/node.supervisor/",
-                prefix = etcd_config.prefix
-            ),
-            format!(
                 "{prefix}/resource/node.worker/",
                 prefix = etcd_config.prefix
             ),
@@ -50,12 +46,6 @@ impl State {
 }
 
 impl State {
-    /// Get all known supervisor nodes and their latest state.
-    pub async fn get_supervisor_nodes(&self) -> HashMap<String, NodeState> {
-        let inner = self.0.read().await;
-        inner.get_nodes(&inner.supervisor_nodes)
-    }
-
     /// Get all known worker nodes and their latest state.
     pub async fn get_worker_nodes(&self) -> HashMap<String, NodeState> {
         let inner = self.0.read().await;
@@ -67,7 +57,6 @@ impl State {
 #[derive(Debug)]
 struct InnerState {
     pub etcd_prefix: String,
-    pub supervisor_nodes: HashMap<String, SocketAddr>,
     pub worker_nodes: HashMap<String, SocketAddr>,
     pub node_is_healthy: HashMap<String, bool>,
     pub node_is_alive: HashMap<String, bool>,
@@ -78,7 +67,6 @@ impl InnerState {
     fn new(etcd_prefix: String) -> Self {
         Self {
             etcd_prefix,
-            supervisor_nodes: HashMap::new(),
             worker_nodes: HashMap::new(),
             node_is_healthy: HashMap::new(),
             node_is_alive: HashMap::new(),
@@ -119,20 +107,11 @@ impl watcher::Watcher for InnerState {
             tracing::info!(name, is_alive = is_create, "node alive check changed");
             self.node_is_alive.insert(name.to_owned(), is_create);
         } else if let Some((_, name)) =
-            key.split_once(&format!("{etcd_prefix}/resource/node.supervisor/"))
-        {
-            if let Some(address) = address_from_node_json(kv.value) {
-                tracing::info!(name, ?address, "found supervisor node");
-                self.supervisor_nodes.insert(name.to_owned(), address);
-            } else {
-                tracing::warn!(name, "could not parse supervisor node definition");
-            }
-        } else if let Some((_, name)) =
             key.split_once(&format!("{etcd_prefix}/resource/node.worker/"))
         {
             if let Some(address) = address_from_node_json(kv.value) {
                 tracing::info!(name, ?address, "found worker node");
-                self.supervisor_nodes.insert(name.to_owned(), address);
+                self.worker_nodes.insert(name.to_owned(), address);
             } else {
                 tracing::warn!(name, "could not parse worker node definition");
             }
@@ -164,5 +143,3 @@ fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
 
     None
 }
-
-///////////////////////////////////////////////////////////////////////////////

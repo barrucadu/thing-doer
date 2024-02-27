@@ -1,9 +1,69 @@
-pub mod args;
 pub mod etcd;
 pub mod heartbeat;
 pub mod resources;
-pub mod services;
-pub mod state;
+
+use std::net::SocketAddr;
+
+use crate::etcd::leaser;
+
+#[derive(Clone, Debug, clap::Args)]
+#[group(skip)]
+pub struct Config {
+    /// Name of this instance, must be unique across the cluster
+    #[clap(long)]
+    pub name: String,
+
+    /// Address to listen for new connections on.
+    #[clap(long, value_parser, env = "LISTEN_ADDRESS")]
+    pub listen_address: SocketAddr,
+
+    /// Address to advertise to the rest of the cluster.  If unspecified, the
+    /// listen address is used.
+    #[clap(long, value_parser, env = "ADVERTISE_ADDRESS")]
+    pub advertise_address: Option<SocketAddr>,
+
+    #[command(flatten)]
+    pub etcd: etcd::Config,
+}
+
+/// The type of a node.
+#[derive(Debug)]
+pub enum NodeType {
+    Scheduler,
+    Worker,
+}
+
+impl std::fmt::Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeType::Scheduler => write!(f, "scheduler"),
+            NodeType::Worker => write!(f, "worker"),
+        }
+    }
+}
+
+/// Start up a new node: register the resource definition and begin the
+/// heartbeat processes.
+pub async fn initialise(config: Config, node_type: NodeType) -> Result<(), Error> {
+    let spec = serde_json::json!({
+        "type": format!("node.{node_type}"),
+        "name": config.name,
+        "spec": {
+            "address": config.advertise_address.unwrap_or(config.listen_address),
+        },
+    });
+    resources::put(&config.etcd, spec).await?;
+
+    let (healthy_lease, alive_lease) =
+        heartbeat::establish_leases(&config.etcd, &config.name).await?;
+
+    tokio::spawn(leaser::task(config.etcd.clone(), healthy_lease));
+    tokio::spawn(leaser::task(config.etcd.clone(), alive_lease));
+
+    Ok(())
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /// Generic error type
 #[derive(Debug)]

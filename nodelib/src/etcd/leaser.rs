@@ -8,7 +8,7 @@ use tonic::{Request, Streaming};
 
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::{
-    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest, RangeRequest,
+    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest,
 };
 use crate::{Error, StreamingError};
 
@@ -52,7 +52,7 @@ pub async fn task(config: Config, mut lease: Lease) {
 
         while retries < MAXIMUM_RETRIES {
             tokio::time::sleep(Duration::from_secs(2_u64.pow(retries))).await;
-            match reestablish_lease(&config, &lease).await {
+            match establish_lease(&config, lease.requested_ttl, lease.key.clone()).await {
                 Ok(new_lease) => {
                     tracing::info!("etcd connection reestablished");
                     lease = new_lease;
@@ -80,15 +80,6 @@ pub async fn task(config: Config, mut lease: Lease) {
 
     // The above is an infinite loop.
     unreachable!();
-}
-
-/// Send a single heartbeat for a lease, rather than starting an infinite loop.
-/// Returns the new TTL.
-pub async fn ping_and_wait_for_pong(config: &Config, lease: &Lease) -> Result<i64, Error> {
-    let (_, mut response_stream) = setup_heartbeat(config, lease).await?;
-    let response = wait_for_pong(&mut response_stream).await?;
-
-    Ok(response.ttl)
 }
 
 /// Create a lease and associate a key with it.  The value of the key is
@@ -122,28 +113,6 @@ pub async fn establish_lease(config: &Config, ttl: i64, key: String) -> Result<L
         actual_ttl: grant.ttl,
         requested_ttl: ttl,
     })
-}
-
-/// Create a new lease based on an existing one.  The existing lease is not
-/// deleted.
-pub async fn reestablish_lease(config: &Config, old_lease: &Lease) -> Result<Lease, Error> {
-    establish_lease(config, old_lease.requested_ttl, old_lease.key.clone()).await
-}
-
-/// Check if a key is still owned by a lease.
-pub async fn is_lease_still_active(config: &Config, lease: &Lease) -> Result<bool, Error> {
-    let mut kv_client = config.kv_client().await?;
-
-    let response = kv_client
-        .range(Request::new(RangeRequest {
-            key: lease.key.clone().into(),
-            limit: 1,
-            ..Default::default()
-        }))
-        .await?
-        .into_inner();
-
-    Ok(response.count == 1 && response.kvs[0].lease == lease.id.0)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

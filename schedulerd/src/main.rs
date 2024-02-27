@@ -2,7 +2,9 @@ use clap::Parser;
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 
-/// thing-doer workerd.
+use schedulerd::state::State;
+
+/// thing-doer schedulerd.
 #[derive(Clone, Debug, Parser)]
 struct Args {
     #[command(flatten)]
@@ -14,8 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let config = Args::parse().node;
+    let _state = State::initialise(config.etcd.clone()).await?;
 
-    nodelib::initialise(config, nodelib::NodeType::Worker).await?;
+    nodelib::initialise(config, nodelib::NodeType::Scheduler).await?;
 
     match signal(SignalKind::terminate()) {
         Ok(mut stream) => {
