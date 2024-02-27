@@ -74,29 +74,26 @@ impl InnerState {
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, suffix)) = key.split_once(&format!("{etcd_prefix}/node/")) {
-            if let Some((name, _)) = suffix.rsplit_once("/healthy") {
-                tracing::info!(name, is_healthy = is_create, "node healthy check changed");
-                self.node_is_healthy.insert(name.to_owned(), is_create);
-            } else if let Some((name, _)) = suffix.rsplit_once("/alive") {
-                tracing::info!(name, is_alive = is_create, "node alive check changed");
-                self.node_is_alive.insert(name.to_owned(), is_create);
-            } else {
-                tracing::warn!(?key, "unexpected watch key");
-            }
-        } else if let Some((_, suffix)) = key.split_once(&format!("{etcd_prefix}/resource/node.")) {
-            let json = String::from_utf8(kv.value).unwrap();
-            let value: Value = serde_json::from_str(&json).unwrap();
-            let address = value["spec"]["address"].as_str().unwrap().parse().unwrap();
-            if let Some((_, name)) = suffix.split_once("supervisor/") {
-                tracing::info!(name, ?address, "found supervisor node");
-                self.supervisor_nodes.insert(name.to_owned(), address);
-            } else if let Some((_, name)) = suffix.split_once("worker/") {
-                tracing::info!(name, ?address, "found worker node");
-                self.worker_nodes.insert(name.to_owned(), address);
-            } else {
-                tracing::warn!(?key, "unexpected watch key");
-            }
+        if let Some((_, name)) = key.split_once(&format!("{etcd_prefix}/node/heartbeat/healthy/")) {
+            tracing::info!(name, is_healthy = is_create, "node healthy check changed");
+            self.node_is_healthy.insert(name.to_owned(), is_create);
+        } else if let Some((_, name)) =
+            key.split_once(&format!("{etcd_prefix}/node/heartbeat/alive/"))
+        {
+            tracing::info!(name, is_alive = is_create, "node alive check changed");
+            self.node_is_alive.insert(name.to_owned(), is_create);
+        } else if let Some((_, name)) =
+            key.split_once(&format!("{etcd_prefix}/resource/node.supervisor/"))
+        {
+            let address = address_from_node_json(kv.value);
+            tracing::info!(name, ?address, "found supervisor node");
+            self.supervisor_nodes.insert(name.to_owned(), address);
+        } else if let Some((_, name)) =
+            key.split_once(&format!("{etcd_prefix}/resource/node.worker/"))
+        {
+            let address = address_from_node_json(kv.value);
+            tracing::info!(name, ?address, "found worker node");
+            self.supervisor_nodes.insert(name.to_owned(), address);
         } else {
             tracing::warn!(?key, "unexpected watch key");
         }
@@ -109,6 +106,15 @@ pub struct NodeState {
     pub address: SocketAddr,
     pub is_healthy: Option<bool>,
     pub is_alive: Option<bool>,
+}
+
+/// Parse a value as node JSON and extract the address field.
+fn address_from_node_json(bytes: Vec<u8>) -> SocketAddr {
+    let json = String::from_utf8(bytes).unwrap();
+    let value: Value = serde_json::from_str(&json).unwrap();
+    let parsed = value["spec"]["address"].as_str().unwrap().parse();
+
+    parsed.unwrap()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -124,34 +130,48 @@ pub static MAXIMUM_RETRIES: u32 = 10;
 pub async fn initialise(etcd_config: EtcdConfig) -> Result<State, Error> {
     let state = State::default();
 
-    let start_revision = scan_initial_state(&etcd_config, &state).await?;
+    let prefixes = &[
+        format!(
+            "{prefix}/node/heartbeat/healthy/",
+            prefix = etcd_config.prefix
+        ),
+        format!(
+            "{prefix}/node/heartbeat/alive/",
+            prefix = etcd_config.prefix
+        ),
+        format!(
+            "{prefix}/resource/node.supervisor/",
+            prefix = etcd_config.prefix
+        ),
+        format!(
+            "{prefix}/resource/node.worker/",
+            prefix = etcd_config.prefix
+        ),
+    ];
 
-    tokio::spawn(watcher_task(
-        etcd_config.clone(),
-        state.clone(),
-        format!("{prefix}/node/", prefix = etcd_config.prefix),
-        start_revision,
-    ));
-    tokio::spawn(watcher_task(
-        etcd_config.clone(),
-        state.clone(),
-        format!("{prefix}/resource/node.", prefix = etcd_config.prefix),
-        start_revision,
-    ));
+    let start_revision = scan_initial_state(&etcd_config, &state, prefixes).await?;
+
+    for prefix in prefixes {
+        tokio::spawn(watcher_task(
+            etcd_config.clone(),
+            state.clone(),
+            prefix.to_owned(),
+            start_revision,
+        ));
+    }
 
     Ok(state)
 }
 
 /// Scan through the existing node data in etcd, storing any we don't know about
 /// in the state.
-async fn scan_initial_state(etcd_config: &EtcdConfig, state: &State) -> Result<i64, Error> {
+async fn scan_initial_state(
+    etcd_config: &EtcdConfig,
+    state: &State,
+    prefixes: &[String],
+) -> Result<i64, Error> {
     let mut kv_client = etcd_config.kv_client().await?;
     let mut revision = 0;
-
-    let prefixes = &[
-        format!("{prefix}/node/", prefix = etcd_config.prefix),
-        format!("{prefix}/resource/node.", prefix = etcd_config.prefix),
-    ];
 
     for prefix in prefixes {
         let range_end = prefix_range_end(prefix);

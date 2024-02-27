@@ -134,7 +134,7 @@ async fn handle_heartbeat(
             let healthy_lease = reestablish_lease(
                 etcd_config,
                 &Lease {
-                    key: alive_lease_key.replace("/alive", "/healthy"),
+                    key: alive_lease_key.replace("/alive/", "/healthy/"),
                     id: healthy_lease_id,
                     actual_ttl: HEALTHY_LEASE_TTL,
                     requested_ttl: HEALTHY_LEASE_TTL,

@@ -286,12 +286,18 @@ async fn establish_lease(etcd_config: &EtcdConfig, ttl: i64, key: String) -> Res
 
 /// The key to use for a node's "healthy" lease.
 fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
-    format!("{prefix}/node/{name}/healthy", prefix = etcd_config.prefix)
+    format!(
+        "{prefix}/node/heartbeat/healthy/{name}",
+        prefix = etcd_config.prefix
+    )
 }
 
 /// The key to use for a node's "alive" lease.
 fn alive_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
-    format!("{prefix}/node/{name}/alive", prefix = etcd_config.prefix)
+    format!(
+        "{prefix}/node/heartbeat/alive/{name}",
+        prefix = etcd_config.prefix
+    )
 }
 
 /// The key to use for a lease-to-key lookup key.
