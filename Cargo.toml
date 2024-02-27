@@ -5,7 +5,6 @@ members = [
   "grpc-supervisord",
   "supervisord",
   "workerd",
-  "placeholder"
 ]
 
 resolver = "2"
