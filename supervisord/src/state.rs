@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::args::EtcdConfig;
+use crate::etcd;
 use crate::etcd::pb::mvccpb::{event::EventType, Event};
 use crate::etcd::watcher;
 use crate::Error;
@@ -19,7 +19,7 @@ impl State {
     ///
     /// If a connection cannot be established to any of the configured etcd hosts,
     /// this raises an error and terminates the process.
-    pub async fn initialise(etcd_config: EtcdConfig) -> Result<State, Error> {
+    pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
         let inner = Arc::new(RwLock::new(InnerState::new(etcd_config.prefix.clone())));
 
         let prefixes = &[

@@ -1,4 +1,4 @@
-use crate::args::EtcdConfig;
+use crate::etcd;
 use crate::etcd::leaser;
 use crate::Error;
 
@@ -11,7 +11,7 @@ pub static ALIVE_LEASE_TTL: i64 = 300;
 
 /// Set up the initial health / liveness leases for a node.
 pub async fn establish_leases(
-    etcd_config: &EtcdConfig,
+    etcd_config: &etcd::Config,
     name: &str,
 ) -> Result<(leaser::Lease, leaser::Lease), Error> {
     let healthy_lease = leaser::establish_lease(
@@ -32,7 +32,7 @@ pub async fn establish_leases(
 }
 
 /// The key to use for a node's "healthy" lease.
-pub fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+pub fn healthy_lease_key(etcd_config: &etcd::Config, name: &str) -> String {
     format!(
         "{prefix}/node/heartbeat/healthy/{name}",
         prefix = etcd_config.prefix
@@ -40,7 +40,7 @@ pub fn healthy_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
 }
 
 /// The key to use for a node's "alive" lease.
-pub fn alive_lease_key(etcd_config: &EtcdConfig, name: &str) -> String {
+pub fn alive_lease_key(etcd_config: &etcd::Config, name: &str) -> String {
     format!(
         "{prefix}/node/heartbeat/alive/{name}",
         prefix = etcd_config.prefix

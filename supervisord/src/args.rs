@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-pub use crate::etcd::config::Config as EtcdConfig;
+pub use crate::etcd;
 
 /// thing-doer supervisord
 #[derive(Clone, Debug, clap::Parser)]
@@ -19,5 +19,5 @@ pub struct Args {
     pub advertise_address: Option<SocketAddr>,
 
     #[command(flatten)]
-    pub etcd_config: EtcdConfig,
+    pub etcd_config: etcd::Config,
 }

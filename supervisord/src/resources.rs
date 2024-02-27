@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tonic::Request;
 
-use crate::args::EtcdConfig;
+use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::{Error, ResourceError};
 
@@ -14,7 +14,7 @@ use crate::{Error, ResourceError};
 /// - Contains only ASCII letters, digits, and hyphens
 /// - Starts with a letter
 /// - Does not end with a hyphen
-pub async fn put(etcd_config: &EtcdConfig, json: Value) -> Result<(), Error> {
+pub async fn put(etcd_config: &etcd::Config, json: Value) -> Result<(), Error> {
     if !json["spec"].is_object() {
         return Err(ResourceError::BadStructure.into());
     }
@@ -37,7 +37,7 @@ pub async fn put(etcd_config: &EtcdConfig, json: Value) -> Result<(), Error> {
 
 /// Like `put` but don't do any validation.
 async fn put_unchecked(
-    etcd_config: &EtcdConfig,
+    etcd_config: &etcd::Config,
     res_type: &str,
     res_name: &str,
     json: &Value,
@@ -67,7 +67,7 @@ fn validate_name(name: &str) -> bool {
 }
 
 /// The key to use for a resource.
-fn resource_key(etcd_config: &EtcdConfig, res_type: &str, res_name: &str) -> String {
+fn resource_key(etcd_config: &etcd::Config, res_type: &str, res_name: &str) -> String {
     format!(
         "{prefix}/resource/{res_type}/{res_name}",
         prefix = etcd_config.prefix

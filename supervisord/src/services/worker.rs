@@ -5,7 +5,7 @@ use grpc_supervisord::worker::{
 use serde_json::json;
 use tonic::{Request, Response, Status};
 
-use crate::args::EtcdConfig;
+use crate::etcd;
 use crate::etcd::leaser;
 use crate::heartbeat;
 use crate::resources;
@@ -17,12 +17,12 @@ pub static HEARTBEAT_TTL: i64 = heartbeat::HEALTHY_LEASE_TTL - 5;
 /// A server for the worker gRPC service.
 #[derive(Debug)]
 pub struct Server {
-    pub etcd_config: EtcdConfig,
+    pub etcd_config: etcd::Config,
 }
 
 impl Server {
     /// Construct a new server instance.
-    pub fn new(etcd_config: EtcdConfig) -> Self {
+    pub fn new(etcd_config: etcd::Config) -> Self {
         Self { etcd_config }
     }
 }
@@ -61,7 +61,7 @@ impl Worker for Server {
 
 /// Private implementation of `Server::register`
 async fn handle_register(
-    etcd_config: &EtcdConfig,
+    etcd_config: &etcd::Config,
     request: RegisterRequest,
 ) -> Result<RegisterResponse, Error> {
     tracing::info!(
@@ -102,7 +102,7 @@ impl From<Error> for HandleHeartbeatError {
 
 /// Private implementation of `Server::heartbeat`
 async fn handle_heartbeat(
-    etcd_config: &EtcdConfig,
+    etcd_config: &etcd::Config,
     request: HeartbeatRequest,
 ) -> Result<HeartbeatResponse, HandleHeartbeatError> {
     if request.worker_id.len() != 2 {
@@ -148,7 +148,7 @@ async fn handle_heartbeat(
 /// Check if a lease is still valid, and renew it if so.  Returns the lease on
 /// success.
 async fn check_and_renew_lease(
-    etcd_config: &EtcdConfig,
+    etcd_config: &etcd::Config,
     lease: &leaser::Lease,
 ) -> Result<bool, Error> {
     // unfortunately, we can't check the lease still exists and also renew it in
