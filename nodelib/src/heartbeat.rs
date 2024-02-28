@@ -1,5 +1,8 @@
+use tonic::Request;
+
 use crate::etcd;
 use crate::etcd::leaser;
+use crate::etcd::pb::etcdserverpb::RangeRequest;
 use crate::Error;
 
 /// If this time elapses without a heartbeat, this instance enters "unhealthy"
@@ -29,6 +32,22 @@ pub async fn establish_leases(
     .await?;
 
     Ok((healthy_lease, alive_lease))
+}
+
+/// Check if a node is still alive.
+pub async fn is_alive(etcd_config: &etcd::Config, name: &str) -> Result<bool, Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+
+    let response = kv_client
+        .range(Request::new(RangeRequest {
+            key: alive_lease_key(etcd_config, name).into(),
+            limit: 1,
+            ..Default::default()
+        }))
+        .await?
+        .into_inner();
+
+    Ok(response.count == 1)
 }
 
 /// The key to use for a node's "healthy" lease.

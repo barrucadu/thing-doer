@@ -4,8 +4,12 @@ pub mod resources;
 pub mod util;
 
 use std::net::SocketAddr;
+use std::process;
 
 use crate::etcd::leaser;
+
+/// Exit code in case the initialisation process failed.
+pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;
 
 #[derive(Clone, Debug, clap::Args)]
 #[group(skip)]
@@ -46,6 +50,14 @@ impl std::fmt::Display for NodeType {
 /// Start up a new node: register the resource definition and begin the
 /// heartbeat processes.
 pub async fn initialise(config: Config, node_type: NodeType) -> Result<(), Error> {
+    if heartbeat::is_alive(&config.etcd, &config.name).await? {
+        tracing::error!(
+            name = config.name,
+            "another node with this name is still alive, terminating..."
+        );
+        process::exit(EXIT_CODE_INITIALISE_FAILED);
+    }
+
     let spec = serde_json::json!({
         "type": format!("node.{node_type}"),
         "name": config.name,
