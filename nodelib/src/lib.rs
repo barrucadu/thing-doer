@@ -1,6 +1,7 @@
 pub mod etcd;
 pub mod heartbeat;
 pub mod resources;
+pub mod util;
 
 use std::net::SocketAddr;
 
@@ -10,7 +11,7 @@ use crate::etcd::leaser;
 #[group(skip)]
 pub struct Config {
     /// Name of this instance, must be unique across the cluster
-    #[clap(long)]
+    #[clap(long, value_parser = |s: &str| Ok::<String, String>(s.to_lowercase()))]
     pub name: String,
 
     /// Address to listen for new connections on.

@@ -3,6 +3,7 @@ use tonic::Request;
 
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
+use crate::util::is_valid_resource_name;
 use crate::{Error, ResourceError};
 
 /// Persist a new resource to etcd.
@@ -21,7 +22,7 @@ pub async fn put(etcd_config: &etcd::Config, json: Value) -> Result<(), Error> {
 
     match (json["type"].as_str(), json["name"].as_str()) {
         (Some(res_type), Some(res_name)) => {
-            if validate_name(res_name) {
+            if is_valid_resource_name(res_name) {
                 let res = put_unchecked(etcd_config, res_type, res_name, &json).await;
                 if let Err(ref error) = res {
                     tracing::warn!(?error, ?json, "could not put resource");
@@ -53,17 +54,6 @@ async fn put_unchecked(
         .await?;
 
     Ok(())
-}
-
-/// Check that a name is a valid DNS label.
-fn validate_name(name: &str) -> bool {
-    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '-';
-
-    !name.is_empty()
-        && name.len() <= 63
-        && name.chars().all(valid_character)
-        && name.starts_with(|c: char| c.is_ascii_alphabetic())
-        && !name.ends_with(|c: char| c == '-')
 }
 
 /// The key to use for a resource.
