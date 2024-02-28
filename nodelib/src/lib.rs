@@ -14,9 +14,13 @@ pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;
 #[derive(Clone, Debug, clap::Args)]
 #[group(skip)]
 pub struct Config {
-    /// Name of this instance, must be unique across the cluster
-    #[clap(long, value_parser = |s: &str| Ok::<String, String>(s.to_lowercase()))]
-    pub name: String,
+    /// Name of this instance, must be unique across the cluster.  If
+    /// unspecified, a random name is generated from the advertise address.
+    #[clap(
+        long,
+        value_parser = |s: &str| Ok::<Option<String>, String>(Some(s.to_lowercase())),
+    )]
+    pub name: Option<String>,
 
     /// Address to listen for new connections on.
     #[clap(long, value_parser, env = "LISTEN_ADDRESS")]
@@ -49,10 +53,16 @@ impl std::fmt::Display for NodeType {
 
 /// Start up a new node: register the resource definition and begin the
 /// heartbeat processes.
-pub async fn initialise(config: Config, node_type: NodeType) -> Result<(), Error> {
-    if heartbeat::is_alive(&config.etcd, &config.name).await? {
+///
+/// Returns the node name, which will be a random unique one if not specified by
+/// the `config`.
+pub async fn initialise(config: Config, node_type: NodeType) -> Result<String, Error> {
+    let address = config.advertise_address.unwrap_or(config.listen_address);
+    let name = config.name.unwrap_or(util::sockaddr_to_name(address));
+
+    if heartbeat::is_alive(&config.etcd, &name).await? {
         tracing::error!(
-            name = config.name,
+            name,
             "another node with this name is still alive, terminating..."
         );
         process::exit(EXIT_CODE_INITIALISE_FAILED);
@@ -60,20 +70,19 @@ pub async fn initialise(config: Config, node_type: NodeType) -> Result<(), Error
 
     let spec = serde_json::json!({
         "type": format!("node.{node_type}"),
-        "name": config.name,
+        "name": name,
         "spec": {
-            "address": config.advertise_address.unwrap_or(config.listen_address),
+            "address": address,
         },
     });
     resources::put(&config.etcd, spec).await?;
 
-    let (healthy_lease, alive_lease) =
-        heartbeat::establish_leases(&config.etcd, &config.name).await?;
+    let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;
 
     tokio::spawn(leaser::task(config.etcd.clone(), healthy_lease));
     tokio::spawn(leaser::task(config.etcd.clone(), alive_lease));
 
-    Ok(())
+    Ok(name)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
