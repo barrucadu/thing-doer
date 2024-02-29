@@ -1,4 +1,3 @@
-use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,40 +8,40 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::watcher;
 use nodelib::Error;
 
+use crate::util;
+
 /// A handle to the shared state.
 #[derive(Debug, Clone)]
 pub struct State(Arc<RwLock<InnerState>>);
 
-impl State {
-    /// Fetch the current state of the cluster from etcd, and establish watches to
-    /// keep the state up to date.
-    ///
-    /// If a connection cannot be established to any of the configured etcd hosts,
-    /// this raises an error and terminates the process.
-    pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
-        let inner = Arc::new(RwLock::new(InnerState::new(etcd_config.prefix.clone())));
+/// Fetch the current state of the cluster from etcd, and establish watches to
+/// keep the state up to date.
+///
+/// If a connection cannot be established to any of the configured etcd hosts,
+/// this raises an error and terminates the process.
+pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
+    let inner = Arc::new(RwLock::new(InnerState::new(etcd_config.prefix.clone())));
 
-        let prefixes = &[
-            format!(
-                "{prefix}/node/heartbeat/healthy/",
-                prefix = etcd_config.prefix
-            ),
-            format!(
-                "{prefix}/node/heartbeat/alive/",
-                prefix = etcd_config.prefix
-            ),
-            format!(
-                "{prefix}/resource/node.worker/",
-                prefix = etcd_config.prefix
-            ),
-        ];
+    let prefixes = &[
+        format!(
+            "{prefix}/node/heartbeat/healthy/",
+            prefix = etcd_config.prefix
+        ),
+        format!(
+            "{prefix}/node/heartbeat/alive/",
+            prefix = etcd_config.prefix
+        ),
+        format!(
+            "{prefix}/resource/node.worker/",
+            prefix = etcd_config.prefix
+        ),
+    ];
 
-        for prefix in prefixes {
-            watcher::setup_watcher(&etcd_config, inner.clone(), prefix.clone()).await?;
-        }
-
-        Ok(State(inner))
+    for prefix in prefixes {
+        watcher::setup_watcher(&etcd_config, inner.clone(), prefix.clone()).await?;
     }
+
+    Ok(State(inner))
 }
 
 impl State {
@@ -131,12 +130,10 @@ pub struct NodeState {
 
 /// Parse a value as node JSON and extract the address field.
 fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
-    if let Ok(json) = String::from_utf8(bytes) {
-        if let Ok(value) = serde_json::from_str::<Value>(&json) {
-            if let Some(address_str) = value["spec"]["address"].as_str() {
-                if let Ok(address) = address_str.parse() {
-                    return Some(address);
-                }
+    if let Some(value) = util::bytes_to_json(bytes) {
+        if let Some(address_str) = value["spec"]["address"].as_str() {
+            if let Ok(address) = address_str.parse() {
+                return Some(address);
             }
         }
     }

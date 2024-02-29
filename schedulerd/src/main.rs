@@ -2,7 +2,7 @@ use clap::Parser;
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 
-use schedulerd::state::State;
+use schedulerd::node_watcher;
 
 /// thing-doer schedulerd.
 #[derive(Clone, Debug, Parser)]
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let config = Args::parse().node;
-    let _state = State::initialise(config.etcd.clone()).await?;
+    let _node_state = node_watcher::initialise(config.etcd.clone()).await?;
 
     nodelib::initialise(config, nodelib::NodeType::Scheduler).await?;
 
