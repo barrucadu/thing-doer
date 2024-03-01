@@ -1,4 +1,5 @@
 use rand::prelude::SliceRandom;
+use serde_json::Value;
 use std::net::{IpAddr, SocketAddr};
 
 /// Characters for encoding to base 36.
@@ -52,4 +53,13 @@ pub fn encode_number(mut num: u128, digits: &[char]) -> String {
         num = q;
     }
     out
+}
+
+/// Parse some bytes into json.
+pub fn bytes_to_json(bytes: Vec<u8>) -> Option<Value> {
+    if let Ok(json) = String::from_utf8(bytes) {
+        serde_json::from_str::<Value>(&json).ok()
+    } else {
+        None
+    }
 }

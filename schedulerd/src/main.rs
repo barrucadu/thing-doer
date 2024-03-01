@@ -3,6 +3,7 @@ use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 
 use schedulerd::node_watcher;
+use schedulerd::pod_scheduler;
 
 /// thing-doer schedulerd.
 #[derive(Clone, Debug, Parser)]
@@ -16,9 +17,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let config = Args::parse().node;
-    let _node_state = node_watcher::initialise(config.etcd.clone()).await?;
+    let etcd_config = config.etcd.clone();
+    let node_state = node_watcher::initialise(etcd_config.clone()).await?;
 
-    nodelib::initialise(config, nodelib::NodeType::Scheduler).await?;
+    let name = nodelib::initialise(config, nodelib::NodeType::Scheduler).await?;
+
+    pod_scheduler::initialise(etcd_config, node_state, name).await?;
 
     match signal(SignalKind::terminate()) {
         Ok(mut stream) => {

@@ -26,7 +26,7 @@ pub static EXIT_CODE_WATCH_FAILED: i32 = 4;
 /// Trait for things which can respond to changes in the etcd state.
 pub trait Watcher {
     /// Apply the state change that a watch event corresponds to.
-    fn apply_event(&mut self, event: Event);
+    fn apply_event(&mut self, event: Event) -> impl std::future::Future<Output = ()> + Send;
 }
 
 /// Fetch the current state of the cluster from etcd, and establish a watch.
@@ -80,11 +80,13 @@ async fn scan_initial_state<W: Watcher>(
 
         let mut inner = watcher.write().await;
         for kv in &response.kvs {
-            inner.apply_event(Event {
-                r#type: EventType::Put.into(),
-                kv: Some(kv.clone()),
-                ..Default::default()
-            });
+            inner
+                .apply_event(Event {
+                    r#type: EventType::Put.into(),
+                    kv: Some(kv.clone()),
+                    ..Default::default()
+                })
+                .await;
         }
 
         if response.more {
@@ -155,7 +157,7 @@ async fn watcher_loop<W: Watcher>(
                 }
                 let mut inner = watcher.write().await;
                 for event in response.events {
-                    inner.apply_event(event);
+                    inner.apply_event(event).await;
                 }
                 rev = response.header.unwrap().revision;
             }

@@ -6,9 +6,8 @@ use tokio::sync::RwLock;
 use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::watcher;
+use nodelib::util;
 use nodelib::Error;
-
-use crate::util;
 
 /// A handle to the shared state.
 #[derive(Debug, Clone)]
@@ -28,10 +27,6 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
             prefix = etcd_config.prefix
         ),
         format!(
-            "{prefix}/node/heartbeat/alive/",
-            prefix = etcd_config.prefix
-        ),
-        format!(
             "{prefix}/resource/node.worker/",
             prefix = etcd_config.prefix
         ),
@@ -46,9 +41,9 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
 
 impl State {
     /// Get all known worker nodes and their latest state.
-    pub async fn get_worker_nodes(&self) -> HashMap<String, NodeState> {
+    pub async fn get_healthy_workers(&self) -> HashMap<String, NodeState> {
         let inner = self.0.read().await;
-        inner.get_nodes(&inner.worker_nodes)
+        inner.get_workers(|node| node.is_healthy.unwrap_or(false))
     }
 }
 
@@ -58,7 +53,6 @@ struct InnerState {
     pub etcd_prefix: String,
     pub worker_nodes: HashMap<String, SocketAddr>,
     pub node_is_healthy: HashMap<String, bool>,
-    pub node_is_alive: HashMap<String, bool>,
 }
 
 impl InnerState {
@@ -68,15 +62,18 @@ impl InnerState {
             etcd_prefix,
             worker_nodes: HashMap::new(),
             node_is_healthy: HashMap::new(),
-            node_is_alive: HashMap::new(),
         }
     }
 
-    /// Get the states of a collection of nodes.
-    fn get_nodes(&self, nodes: &HashMap<String, SocketAddr>) -> HashMap<String, NodeState> {
-        nodes
+    /// Get the worker nodes matching a predicate.
+    fn get_workers<P>(&self, mut predicate: P) -> HashMap<String, NodeState>
+    where
+        P: FnMut(&NodeState) -> bool,
+    {
+        self.worker_nodes
             .iter()
             .map(|(name, address)| (name.to_owned(), self.get_node_state(name, *address)))
+            .filter(|(_, v)| predicate(v))
             .collect()
     }
 
@@ -85,13 +82,12 @@ impl InnerState {
         NodeState {
             address,
             is_healthy: self.node_is_healthy.get(name).copied(),
-            is_alive: self.node_is_alive.get(name).copied(),
         }
     }
 }
 
 impl watcher::Watcher for InnerState {
-    fn apply_event(&mut self, event: Event) {
+    async fn apply_event(&mut self, event: Event) {
         let etcd_prefix = &self.etcd_prefix;
         let is_create = event.r#type() == EventType::Put;
         let kv = event.kv.unwrap();
@@ -100,11 +96,6 @@ impl watcher::Watcher for InnerState {
         if let Some((_, name)) = key.split_once(&format!("{etcd_prefix}/node/heartbeat/healthy/")) {
             tracing::info!(name, is_healthy = is_create, "node healthy check changed");
             self.node_is_healthy.insert(name.to_owned(), is_create);
-        } else if let Some((_, name)) =
-            key.split_once(&format!("{etcd_prefix}/node/heartbeat/alive/"))
-        {
-            tracing::info!(name, is_alive = is_create, "node alive check changed");
-            self.node_is_alive.insert(name.to_owned(), is_create);
         } else if let Some((_, name)) =
             key.split_once(&format!("{etcd_prefix}/resource/node.worker/"))
         {
@@ -125,7 +116,6 @@ impl watcher::Watcher for InnerState {
 pub struct NodeState {
     pub address: SocketAddr,
     pub is_healthy: Option<bool>,
-    pub is_alive: Option<bool>,
 }
 
 /// Parse a value as node JSON and extract the address field.
