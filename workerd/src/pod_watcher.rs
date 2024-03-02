@@ -31,7 +31,7 @@ pub async fn initialise(
     my_name: String,
     lease_id: LeaseId,
 ) -> Result<(), Error> {
-    let (new_pod_tx, new_pod_rx) = mpsc::channel(16);
+    let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
 
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
@@ -74,7 +74,7 @@ impl watcher::Watcher for WatchState {
                 if let Some(value) = util::bytes_to_json(kv.value) {
                     tracing::info!(name, "found new pod");
                     self.pending_pods.insert(name.to_owned(), value);
-                    if let Err(error) = self.new_pod_tx.send(name.to_owned()).await {
+                    if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
                         tracing::warn!(name, ?error, "could not trigger claimer");
                     }
                 } else {
@@ -105,7 +105,7 @@ async fn retry_task(state: Arc<RwLock<WatchState>>) {
             let w = state.write().await;
             for name in pods_to_retry {
                 tracing::info!(name, "retrying pending pod");
-                if let Err(error) = w.new_pod_tx.send(name.clone()).await {
+                if let Err(error) = w.new_pod_tx.try_send(name.clone()) {
                     tracing::warn!(name, ?error, "could not trigger claimer");
                 }
             }

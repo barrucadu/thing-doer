@@ -28,7 +28,7 @@ pub static RETRY_INTERVAL: u64 = 60;
 
 /// Set up a watcher for new dead pods, and the background tasks to reap them.
 pub async fn initialise(etcd_config: etcd::Config, my_name: String) -> Result<(), Error> {
-    let (reap_pod_tx, reap_pod_rx) = mpsc::channel(16);
+    let (reap_pod_tx, reap_pod_rx) = mpsc::channel(128);
 
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
@@ -70,7 +70,7 @@ impl watcher::Watcher for WatchState {
             if is_delete {
                 tracing::info!(name, "found reapable pod");
                 self.unreaped_pods.insert(name.to_owned());
-                if let Err(error) = self.reap_pod_tx.send(name.to_owned()).await {
+                if let Err(error) = self.reap_pod_tx.try_send(name.to_owned()) {
                     tracing::warn!(name, ?error, "could not trigger reaper");
                 }
             }
@@ -96,7 +96,7 @@ async fn retry_task(state: Arc<RwLock<WatchState>>) {
             let w = state.write().await;
             for name in pods_to_retry {
                 tracing::info!(name, "retrying unreaped pod");
-                if let Err(error) = w.reap_pod_tx.send(name.clone()).await {
+                if let Err(error) = w.reap_pod_tx.try_send(name.clone()) {
                     tracing::warn!(name, ?error, "could not trigger reaper");
                 }
             }
