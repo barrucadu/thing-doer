@@ -21,22 +21,24 @@ use nodelib::Error;
 /// Exit code in case the claimer channel closes.
 pub static EXIT_CODE_CLAIMER_FAILED: i32 = 1;
 
-/// Interval to retry pods that could not be scheduled.
+/// Interval to retry pods that could not be processed.
 pub static RETRY_INTERVAL: u64 = 60;
 
-/// Set up a watcher for new assigned pods, and the background tasks to start
+/// Set up a watcher for new assigned pods, and the background tasks to claim
 /// the pods.
 pub async fn initialise(
     etcd_config: etcd::Config,
     my_name: String,
     lease_id: LeaseId,
+    work_pod_tx: Sender<(String, Value)>,
 ) -> Result<(), Error> {
     let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
 
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
         my_name: my_name.clone(),
-        pending_pods: HashMap::new(),
+        unclaimed_pods: HashMap::new(),
+        unworked_pods: HashMap::new(),
         new_pod_tx,
     }));
 
@@ -47,8 +49,14 @@ pub async fn initialise(
     )
     .await?;
 
-    tokio::spawn(claim_task(state.clone(), lease_id, new_pod_rx));
-    tokio::spawn(retry_task(state.clone()));
+    tokio::spawn(claim_task(
+        state.clone(),
+        lease_id,
+        new_pod_rx,
+        work_pod_tx.clone(),
+    ));
+    tokio::spawn(retry_claim_task(state.clone()));
+    tokio::spawn(retry_work_task(state.clone(), work_pod_tx));
 
     Ok(())
 }
@@ -58,7 +66,8 @@ pub async fn initialise(
 struct WatchState {
     pub my_name: String,
     pub etcd_config: etcd::Config,
-    pub pending_pods: HashMap<String, Value>,
+    pub unclaimed_pods: HashMap<String, Value>,
+    pub unworked_pods: HashMap<String, Value>,
     pub new_pod_tx: Sender<String>,
 }
 
@@ -73,15 +82,15 @@ impl watcher::Watcher for WatchState {
             if is_create {
                 if let Some(value) = util::bytes_to_json(kv.value) {
                     tracing::info!(name, "found new pod");
-                    self.pending_pods.insert(name.to_owned(), value);
+                    self.unclaimed_pods.insert(name.to_owned(), value);
                     if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
                         tracing::warn!(name, ?error, "could not trigger claimer");
                     }
                 } else {
                     tracing::warn!(?key, "could not parse pod definition");
                 }
-            } else if self.pending_pods.remove(name).is_some() {
-                tracing::info!(name, "deleted pending pod");
+            } else if self.unclaimed_pods.remove(name).is_some() {
+                tracing::info!(name, "deleted unclaimed pod");
             }
         } else {
             tracing::warn!(?key, "unexpected watch key");
@@ -89,26 +98,49 @@ impl watcher::Watcher for WatchState {
     }
 }
 
-/// Background task to queue up all pending pods every `RETRY_INTERVAL`
+/// Background task to queue up all unclaimed pods every `RETRY_INTERVAL`
 /// seconds.
-async fn retry_task(state: Arc<RwLock<WatchState>>) {
+async fn retry_claim_task(state: Arc<RwLock<WatchState>>) {
     loop {
         tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
 
         let pods_to_retry = {
             let r = state.read().await;
-            r.pending_pods.keys().cloned().collect::<Vec<_>>()
+            r.unclaimed_pods.keys().cloned().collect::<Vec<_>>()
         };
 
         if !pods_to_retry.is_empty() {
-            tracing::info!(count = ?pods_to_retry.len(), "retrying pending pods");
+            tracing::info!(count = ?pods_to_retry.len(), "retrying unclaimed pods");
             let w = state.write().await;
             for name in pods_to_retry {
-                tracing::info!(name, "retrying pending pod");
+                tracing::info!(name, "retrying unclaimed pod");
                 if let Err(error) = w.new_pod_tx.try_send(name.clone()) {
                     tracing::warn!(name, ?error, "could not trigger claimer");
                 }
             }
+        }
+    }
+}
+
+/// Background task to queue up all unworked pods every `RETRY_INTERVAL`
+/// seconds.
+async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<(String, Value)>) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
+
+        let mut w = state.write().await;
+        if !w.unworked_pods.is_empty() {
+            let count = w.unworked_pods.len();
+            tracing::info!(?count, "retrying unworked pods");
+            let mut new_unworked_pods = HashMap::with_capacity(count);
+            for pod in w.unworked_pods.drain() {
+                tracing::info!(name = pod.0, "retrying unworked pod");
+                if let Err(error) = work_pod_tx.try_send(pod.clone()) {
+                    tracing::warn!(name = pod.0, ?error, "could not trigger worker");
+                    new_unworked_pods.insert(pod.0, pod.1);
+                }
+            }
+            w.unworked_pods = new_unworked_pods;
         }
     }
 }
@@ -118,15 +150,25 @@ async fn claim_task(
     state: Arc<RwLock<WatchState>>,
     lease_id: LeaseId,
     mut new_pod_rx: Receiver<String>,
+    work_pod_tx: Sender<(String, Value)>,
 ) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
-        if let Some(resource) = w.pending_pods.remove(&pod_name) {
+        if let Some(resource) = w.unclaimed_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got claim request");
-            if let Err(error) = claim_pod(&w, pod_name.to_owned(), lease_id, resource.clone()).await
-            {
-                tracing::warn!(pod_name, ?error, "could not claim pod, retrying...");
-                w.pending_pods.insert(pod_name.to_owned(), resource);
+            match claim_pod(&w, pod_name.to_owned(), lease_id, resource.clone()).await {
+                Ok(resource) => {
+                    if let Err(error) =
+                        work_pod_tx.try_send((pod_name.to_owned(), resource.clone()))
+                    {
+                        tracing::warn!(pod_name, ?error, "could not work pod, retrying...");
+                        w.unworked_pods.insert(pod_name.to_owned(), resource);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(pod_name, ?error, "could not claim pod, retrying...");
+                    w.unclaimed_pods.insert(pod_name.to_owned(), resource);
+                }
             }
         } else {
             tracing::warn!(pod_name, "got claim request for missing pod");
@@ -137,15 +179,13 @@ async fn claim_task(
     process::exit(EXIT_CODE_CLAIMER_FAILED);
 }
 
-/// Update a pod's state to "accepted".
-///
-/// TODO trigger something to start the pod process.
+/// Update a pod's state to "accepted" and remove it from the inbox.
 async fn claim_pod(
     state: &WatchState,
     pod_name: String,
     lease_id: LeaseId,
     mut pod_resource: Value,
-) -> Result<(), Error> {
+) -> Result<Value, Error> {
     pod_resource["state"] = "accepted".into();
 
     let mut kv_client = state.etcd_config.kv_client().await?;
@@ -193,5 +233,5 @@ async fn claim_pod(
         }))
         .await?;
 
-    Ok(())
+    Ok(pod_resource)
 }

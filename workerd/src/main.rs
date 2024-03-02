@@ -1,7 +1,8 @@
 use clap::Parser;
 use std::process;
 
-use workerd::pod_watcher;
+use workerd::pod_claimer;
+use workerd::pod_worker;
 
 /// thing-doer workerd.
 #[derive(Clone, Debug, Parser)]
@@ -19,7 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (name, lease_id) = nodelib::initialise(config, nodelib::NodeType::Worker).await?;
 
-    pod_watcher::initialise(etcd_config, name, lease_id).await?;
+    let work_pod_tx = pod_worker::initialise(etcd_config.clone()).await?;
+    pod_claimer::initialise(etcd_config, name, lease_id, work_pod_tx).await?;
 
     nodelib::wait_for_sigterm().await;
     process::exit(0);
