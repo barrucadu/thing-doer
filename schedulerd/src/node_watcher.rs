@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 
 use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
+use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::util;
 use nodelib::Error;
@@ -19,17 +20,15 @@ pub struct State(Arc<RwLock<InnerState>>);
 /// If a connection cannot be established to any of the configured etcd hosts,
 /// this raises an error and terminates the process.
 pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
-    let inner = Arc::new(RwLock::new(InnerState::new(etcd_config.prefix.clone())));
+    let inner = Arc::new(RwLock::new(InnerState {
+        etcd_config: etcd_config.clone(),
+        worker_nodes: HashMap::new(),
+        node_is_healthy: HashMap::new(),
+    }));
 
     let prefixes = &[
-        format!(
-            "{prefix}/node/heartbeat/healthy/",
-            prefix = etcd_config.prefix
-        ),
-        format!(
-            "{prefix}/resource/node.worker/",
-            prefix = etcd_config.prefix
-        ),
+        prefix::node_heartbeat_healthy(&etcd_config),
+        prefix::resource(&etcd_config, "node.worker"),
     ];
 
     for prefix in prefixes {
@@ -50,21 +49,12 @@ impl State {
 /// The internal state, only visible to the update task and query methods.
 #[derive(Debug)]
 struct InnerState {
-    pub etcd_prefix: String,
+    pub etcd_config: etcd::Config,
     pub worker_nodes: HashMap<String, SocketAddr>,
     pub node_is_healthy: HashMap<String, bool>,
 }
 
 impl InnerState {
-    /// Create a new InnerState.
-    fn new(etcd_prefix: String) -> Self {
-        Self {
-            etcd_prefix,
-            worker_nodes: HashMap::new(),
-            node_is_healthy: HashMap::new(),
-        }
-    }
-
     /// Get the worker nodes matching a predicate.
     fn get_workers<P>(&self, mut predicate: P) -> HashMap<String, NodeState>
     where
@@ -88,17 +78,17 @@ impl InnerState {
 
 impl watcher::Watcher for InnerState {
     async fn apply_event(&mut self, event: Event) {
-        let etcd_prefix = &self.etcd_prefix;
+        let healthcheck_prefix = prefix::node_heartbeat_healthy(&self.etcd_config);
+        let resource_prefix = prefix::resource(&self.etcd_config, "node.worker");
+
         let is_create = event.r#type() == EventType::Put;
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, name)) = key.split_once(&format!("{etcd_prefix}/node/heartbeat/healthy/")) {
+        if let Some((_, name)) = key.split_once(&healthcheck_prefix) {
             tracing::info!(name, is_healthy = is_create, "node healthy check changed");
             self.node_is_healthy.insert(name.to_owned(), is_create);
-        } else if let Some((_, name)) =
-            key.split_once(&format!("{etcd_prefix}/resource/node.worker/"))
-        {
+        } else if let Some((_, name)) = key.split_once(&resource_prefix) {
             if let Some(address) = address_from_node_json(kv.value) {
                 tracing::info!(name, ?address, "found worker node");
                 self.worker_nodes.insert(name.to_owned(), address);

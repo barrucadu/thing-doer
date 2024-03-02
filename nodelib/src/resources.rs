@@ -3,6 +3,7 @@ use tonic::Request;
 
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
+use crate::etcd::prefix;
 use crate::util::is_valid_resource_name;
 use crate::{Error, ResourceError};
 
@@ -47,19 +48,15 @@ async fn put_unchecked(
 
     kv_client
         .put(Request::new(PutRequest {
-            key: resource_key(etcd_config, res_type, res_name).into(),
+            key: format!(
+                "{prefix}{res_name}",
+                prefix = prefix::resource(etcd_config, res_type)
+            )
+            .into(),
             value: json.to_string().into(),
             ..Default::default()
         }))
         .await?;
 
     Ok(())
-}
-
-/// The key to use for a resource.
-fn resource_key(etcd_config: &etcd::Config, res_type: &str, res_name: &str) -> String {
-    format!(
-        "{prefix}/resource/{res_type}/{res_name}",
-        prefix = etcd_config.prefix
-    )
 }

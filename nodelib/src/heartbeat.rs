@@ -3,6 +3,7 @@ use tonic::Request;
 use crate::etcd;
 use crate::etcd::leaser;
 use crate::etcd::pb::etcdserverpb::RangeRequest;
+use crate::etcd::prefix;
 use crate::Error;
 
 /// If this time elapses without a heartbeat, this instance enters "unhealthy"
@@ -20,14 +21,20 @@ pub async fn establish_leases(
     let healthy_lease = leaser::establish_lease(
         etcd_config,
         HEALTHY_LEASE_TTL,
-        healthy_lease_key(etcd_config, name),
+        format!(
+            "{prefix}{name}",
+            prefix = prefix::node_heartbeat_healthy(etcd_config)
+        ),
     )
     .await?;
 
     let alive_lease = leaser::establish_lease(
         etcd_config,
         ALIVE_LEASE_TTL,
-        alive_lease_key(etcd_config, name),
+        format!(
+            "{prefix}{name}",
+            prefix = prefix::node_heartbeat_alive(etcd_config)
+        ),
     )
     .await?;
 
@@ -40,7 +47,11 @@ pub async fn is_alive(etcd_config: &etcd::Config, name: &str) -> Result<bool, Er
 
     let response = kv_client
         .range(Request::new(RangeRequest {
-            key: alive_lease_key(etcd_config, name).into(),
+            key: format!(
+                "{prefix}{name}",
+                prefix = prefix::node_heartbeat_alive(etcd_config)
+            )
+            .into(),
             limit: 1,
             ..Default::default()
         }))
@@ -48,20 +59,4 @@ pub async fn is_alive(etcd_config: &etcd::Config, name: &str) -> Result<bool, Er
         .into_inner();
 
     Ok(response.count == 1)
-}
-
-/// The key to use for a node's "healthy" lease.
-fn healthy_lease_key(etcd_config: &etcd::Config, name: &str) -> String {
-    format!(
-        "{prefix}/node/heartbeat/healthy/{name}",
-        prefix = etcd_config.prefix
-    )
-}
-
-/// The key to use for a node's "alive" lease.
-fn alive_lease_key(etcd_config: &etcd::Config, name: &str) -> String {
-    format!(
-        "{prefix}/node/heartbeat/alive/{name}",
-        prefix = etcd_config.prefix
-    )
 }

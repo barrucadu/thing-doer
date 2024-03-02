@@ -5,6 +5,7 @@ pub mod util;
 
 use std::net::SocketAddr;
 use std::process;
+use tokio::signal::unix::{signal, SignalKind};
 
 use crate::etcd::leaser;
 
@@ -38,6 +39,7 @@ pub struct Config {
 /// The type of a node.
 #[derive(Debug)]
 pub enum NodeType {
+    Reaper,
     Scheduler,
     Worker,
 }
@@ -45,6 +47,7 @@ pub enum NodeType {
 impl std::fmt::Display for NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            NodeType::Reaper => write!(f, "reaper"),
             NodeType::Scheduler => write!(f, "scheduler"),
             NodeType::Worker => write!(f, "worker"),
         }
@@ -55,8 +58,11 @@ impl std::fmt::Display for NodeType {
 /// heartbeat processes.
 ///
 /// Returns the node name, which will be a random unique one if not specified by
-/// the `config`.
-pub async fn initialise(config: Config, node_type: NodeType) -> Result<String, Error> {
+/// the `config`, and the liveness lease ID.
+pub async fn initialise(
+    config: Config,
+    node_type: NodeType,
+) -> Result<(String, leaser::LeaseId), Error> {
     let address = config.advertise_address.unwrap_or(config.listen_address);
     let name = config.name.unwrap_or(util::sockaddr_to_name(address));
 
@@ -78,11 +84,26 @@ pub async fn initialise(config: Config, node_type: NodeType) -> Result<String, E
     resources::put(&config.etcd, spec).await?;
 
     let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;
+    let alive_lease_id = alive_lease.id;
 
     tokio::spawn(leaser::task(config.etcd.clone(), healthy_lease));
     tokio::spawn(leaser::task(config.etcd.clone(), alive_lease));
 
-    Ok(name)
+    Ok((name, alive_lease_id))
+}
+
+/// Wait for SIGTERM.
+pub async fn wait_for_sigterm() {
+    match signal(SignalKind::terminate()) {
+        Ok(mut stream) => {
+            stream.recv().await;
+            tracing::info!("received shutdown signal, terminating...");
+        }
+        Err(error) => {
+            tracing::error!(?error, "could not subscribe to SIGTERM");
+            process::exit(EXIT_CODE_INITIALISE_FAILED);
+        }
+    };
 }
 
 ///////////////////////////////////////////////////////////////////////////////

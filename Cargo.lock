@@ -805,6 +805,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaperd"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nodelib",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "regex"
 version = "1.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

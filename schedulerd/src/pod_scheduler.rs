@@ -16,6 +16,7 @@ use nodelib::etcd::pb::etcdserverpb::{
     Compare, DeleteRangeRequest, PutRequest, RequestOp, TxnRequest,
 };
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
+use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::util;
 use nodelib::Error;
@@ -48,9 +49,13 @@ pub async fn initialise(
         unscheduled_pods: HashMap::new(),
         new_pod_tx,
     }));
-    let prefix = format!("{prefix}/unscheduled-pods/", prefix = etcd_config.prefix);
 
-    watcher::setup_watcher(&etcd_config, state.clone(), prefix).await?;
+    watcher::setup_watcher(
+        &etcd_config,
+        state.clone(),
+        prefix::unscheduled_pods(&etcd_config),
+    )
+    .await?;
 
     tokio::spawn(schedule_task(state.clone(), new_pod_rx));
     tokio::spawn(retry_task(state.clone()));
@@ -70,12 +75,12 @@ struct WatchState {
 
 impl watcher::Watcher for WatchState {
     async fn apply_event(&mut self, event: Event) {
-        let etcd_prefix = &self.etcd_config.prefix;
+        let prefix = prefix::unscheduled_pods(&self.etcd_config);
         let is_create = event.r#type() == EventType::Put;
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, name)) = key.split_once(&format!("{etcd_prefix}/unscheduled-pods/")) {
+        if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
                 if let Some(value) = util::bytes_to_json(kv.value) {
                     tracing::info!(name, "found new pod");
@@ -261,9 +266,14 @@ async fn txn_check_and_schedule(
     worker_name: Option<&str>,
     pod_resource: Value,
 ) -> Result<bool, Error> {
-    let etcd_prefix = &etcd_config.prefix;
-    let unscheduled_pod_key = format!("{etcd_prefix}/unscheduled-pods/{pod_name}");
-    let pod_resource_key = format!("{etcd_prefix}/resource/pod/{pod_name}");
+    let unscheduled_pod_key = format!(
+        "{prefix}{pod_name}",
+        prefix = prefix::unscheduled_pods(etcd_config)
+    );
+    let pod_resource_key = format!(
+        "{prefix}{pod_name}",
+        prefix = prefix::resource(etcd_config, "pod")
+    );
     let pod_resource_json = pod_resource.to_string();
 
     // not sure how to check it exists directly, so just check it exists and has
@@ -293,7 +303,10 @@ async fn txn_check_and_schedule(
         },
     ];
     if let Some(n) = worker_name {
-        let worker_inbox_key = format!("{etcd_prefix}/worker-inbox/{n}/{pod_name}");
+        let worker_inbox_key = format!(
+            "{prefix}{pod_name}",
+            prefix = prefix::worker_inbox(etcd_config, n)
+        );
         success.push(RequestOp {
             request: Some(request_op::Request::RequestPut(PutRequest {
                 key: worker_inbox_key.into(),

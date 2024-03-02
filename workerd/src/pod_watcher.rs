@@ -9,9 +9,11 @@ use tokio::sync::RwLock;
 use tonic::Request;
 
 use nodelib::etcd;
+use nodelib::etcd::leaser::LeaseId;
 use nodelib::etcd::pb::etcdserverpb::request_op;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest, RequestOp, TxnRequest};
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
+use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::util;
 use nodelib::Error;
@@ -24,7 +26,11 @@ pub static RETRY_INTERVAL: u64 = 60;
 
 /// Set up a watcher for new assigned pods, and the background tasks to start
 /// the pods.
-pub async fn initialise(etcd_config: etcd::Config, my_name: String) -> Result<(), Error> {
+pub async fn initialise(
+    etcd_config: etcd::Config,
+    my_name: String,
+    lease_id: LeaseId,
+) -> Result<(), Error> {
     let (new_pod_tx, new_pod_rx) = mpsc::channel(16);
 
     let state = Arc::new(RwLock::new(WatchState {
@@ -33,11 +39,15 @@ pub async fn initialise(etcd_config: etcd::Config, my_name: String) -> Result<()
         pending_pods: HashMap::new(),
         new_pod_tx,
     }));
-    let prefix = inbox_prefix(&etcd_config, &my_name);
 
-    watcher::setup_watcher(&etcd_config, state.clone(), prefix).await?;
+    watcher::setup_watcher(
+        &etcd_config,
+        state.clone(),
+        prefix::worker_inbox(&etcd_config, &my_name),
+    )
+    .await?;
 
-    tokio::spawn(claim_task(state.clone(), new_pod_rx));
+    tokio::spawn(claim_task(state.clone(), lease_id, new_pod_rx));
     tokio::spawn(retry_task(state.clone()));
 
     Ok(())
@@ -54,7 +64,7 @@ struct WatchState {
 
 impl watcher::Watcher for WatchState {
     async fn apply_event(&mut self, event: Event) {
-        let prefix = inbox_prefix(&self.etcd_config, &self.my_name);
+        let prefix = prefix::worker_inbox(&self.etcd_config, &self.my_name);
         let is_create = event.r#type() == EventType::Put;
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
@@ -104,12 +114,17 @@ async fn retry_task(state: Arc<RwLock<WatchState>>) {
 }
 
 /// Background task to claim pods.
-async fn claim_task(state: Arc<RwLock<WatchState>>, mut new_pod_rx: Receiver<String>) {
+async fn claim_task(
+    state: Arc<RwLock<WatchState>>,
+    lease_id: LeaseId,
+    mut new_pod_rx: Receiver<String>,
+) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
         if let Some(resource) = w.pending_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got claim request");
-            if let Err(error) = claim_pod(&w, pod_name.to_owned(), resource.clone()).await {
+            if let Err(error) = claim_pod(&w, pod_name.to_owned(), lease_id, resource.clone()).await
+            {
                 tracing::warn!(pod_name, ?error, "could not claim pod, retrying...");
                 w.pending_pods.insert(pod_name.to_owned(), resource);
             }
@@ -128,11 +143,9 @@ async fn claim_task(state: Arc<RwLock<WatchState>>, mut new_pod_rx: Receiver<Str
 async fn claim_pod(
     state: &WatchState,
     pod_name: String,
+    lease_id: LeaseId,
     mut pod_resource: Value,
 ) -> Result<(), Error> {
-    let etcd_prefix = &state.etcd_config.prefix;
-    let my_name = &state.my_name;
-
     pod_resource["state"] = "accepted".into();
 
     let mut kv_client = state.etcd_config.kv_client().await?;
@@ -143,14 +156,34 @@ async fn claim_pod(
                 RequestOp {
                     request: Some(request_op::Request::RequestDeleteRange(
                         DeleteRangeRequest {
-                            key: format!("{etcd_prefix}/worker-inbox/{my_name}/{pod_name}").into(),
+                            key: format!(
+                                "{prefix}{pod_name}",
+                                prefix = prefix::worker_inbox(&state.etcd_config, &state.my_name)
+                            )
+                            .into(),
                             ..Default::default()
                         },
                     )),
                 },
                 RequestOp {
                     request: Some(request_op::Request::RequestPut(PutRequest {
-                        key: format!("{etcd_prefix}/resource/pod/{pod_name}").into(),
+                        key: format!(
+                            "{prefix}{pod_name}",
+                            prefix = prefix::claimed_pods(&state.etcd_config)
+                        )
+                        .into(),
+                        value: state.my_name.clone().into(),
+                        lease: lease_id.0,
+                        ..Default::default()
+                    })),
+                },
+                RequestOp {
+                    request: Some(request_op::Request::RequestPut(PutRequest {
+                        key: format!(
+                            "{prefix}{pod_name}",
+                            prefix = prefix::resource(&state.etcd_config, "pod")
+                        )
+                        .into(),
                         value: pod_resource.to_string().into(),
                         ..Default::default()
                     })),
@@ -161,12 +194,4 @@ async fn claim_pod(
         .await?;
 
     Ok(())
-}
-
-/// Prefix under which new pods are written.
-fn inbox_prefix(etcd_config: &etcd::Config, my_name: &str) -> String {
-    format!(
-        "{etcd_prefix}/worker-inbox/{my_name}/",
-        etcd_prefix = etcd_config.prefix
-    )
 }

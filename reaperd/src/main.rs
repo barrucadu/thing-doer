@@ -1,10 +1,9 @@
 use clap::Parser;
 use std::process;
 
-use schedulerd::node_watcher;
-use schedulerd::pod_scheduler;
+use reaperd::pod_reaper;
 
-/// thing-doer schedulerd.
+/// thing-doer reaperd.
 #[derive(Clone, Debug, Parser)]
 struct Args {
     #[command(flatten)]
@@ -17,12 +16,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Args::parse().node;
     let etcd_config = config.etcd.clone();
-    let node_state = node_watcher::initialise(etcd_config.clone()).await?;
 
-    let (name, _) = nodelib::initialise(config, nodelib::NodeType::Scheduler).await?;
+    let (name, _) = nodelib::initialise(config, nodelib::NodeType::Reaper).await?;
 
-    pod_scheduler::initialise(etcd_config, node_state, name).await?;
+    pod_reaper::initialise(etcd_config, name).await?;
 
     nodelib::wait_for_sigterm().await;
-    process::exit(0);
+    process::exit(0)
 }

@@ -2,6 +2,7 @@
 
 members = [
   "nodelib",
+  "reaperd",
   "schedulerd",
   "workerd",
 ]
