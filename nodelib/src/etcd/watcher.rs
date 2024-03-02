@@ -14,6 +14,7 @@ use crate::etcd::pb::etcdserverpb::{
     RangeRequest, WatchCreateRequest, WatchRequest, WatchResponse,
 };
 use crate::etcd::pb::mvccpb::{event::EventType, Event};
+use crate::etcd::prefix;
 use crate::{Error, StreamingError};
 
 /// The maximum number of retries in case of failure to watch.
@@ -61,7 +62,7 @@ async fn scan_initial_state<W: Watcher>(
     let mut kv_client = config.kv_client().await?;
     let mut revision = 0;
 
-    let range_end = prefix_range_end(key_prefix);
+    let range_end = prefix::range_end(key_prefix);
     let mut key = key_prefix.as_bytes().to_vec();
 
     loop {
@@ -181,7 +182,7 @@ async fn setup_watch(
     tx.send(WatchRequest {
         request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
             key: key_prefix.into(),
-            range_end: prefix_range_end(key_prefix),
+            range_end: prefix::range_end(key_prefix),
             start_revision,
             ..Default::default()
         })),
@@ -195,15 +196,4 @@ async fn setup_watch(
         .into_inner();
 
     Ok((tx, response_stream))
-}
-
-/// Get a `range_end` to cover all keys under the given prefix.
-fn prefix_range_end(key_prefix: &str) -> Vec<u8> {
-    // "If the range_end is one bit larger than the given key, then all keys
-    // with the prefix (the given key) will be watched."
-    let mut range_end: Vec<u8> = key_prefix.into();
-    let idx = range_end.len() - 1;
-    range_end[idx] += 1;
-
-    range_end
 }

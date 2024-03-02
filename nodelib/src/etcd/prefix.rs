@@ -38,3 +38,14 @@ pub fn node_heartbeat_alive(config: &Config) -> String {
 pub fn resource(config: &Config, res_type: &str) -> String {
     format!("{prefix}/resource/{res_type}/", prefix = config.prefix)
 }
+
+/// Get a `range_end` to cover all keys under the given prefix.
+pub fn range_end(key_prefix: &str) -> Vec<u8> {
+    // "If the range_end is one bit larger than the given key, then all keys
+    // with the prefix (the given key) will be watched."
+    let mut range_end: Vec<u8> = key_prefix.into();
+    let idx = range_end.len() - 1;
+    range_end[idx] += 1;
+
+    range_end
+}

@@ -1,7 +1,8 @@
 use clap::Parser;
 use std::process;
 
-use reaperd::pod_reaper;
+use reaperd::node_watcher;
+use reaperd::pod_watcher;
 
 /// thing-doer reaperd.
 #[derive(Clone, Debug, Parser)]
@@ -19,7 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (name, _) = nodelib::initialise(config, nodelib::NodeType::Reaper).await?;
 
-    pod_reaper::initialise(etcd_config, name).await?;
+    let reap_pod_tx = pod_watcher::initialise(etcd_config.clone(), name).await?;
+    node_watcher::initialise(etcd_config, reap_pod_tx).await?;
 
     nodelib::wait_for_sigterm().await;
     process::exit(0)
