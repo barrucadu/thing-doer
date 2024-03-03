@@ -15,7 +15,7 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::Resource;
-use nodelib::Error;
+use nodelib::types::Error;
 
 /// Exit code in case the claimer channel closes.
 pub static EXIT_CODE_CLAIMER_FAILED: i32 = 1;

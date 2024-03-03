@@ -15,7 +15,7 @@ use crate::etcd::pb::etcdserverpb::{
 };
 use crate::etcd::pb::mvccpb::{event::EventType, Event};
 use crate::etcd::prefix;
-use crate::{Error, StreamingError};
+use crate::types::{Error, StreamingError};
 
 /// The maximum number of retries in case of failure to watch.
 pub static MAXIMUM_RETRIES: u32 = 10;

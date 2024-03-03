@@ -6,8 +6,8 @@ use tonic::Request;
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
+use crate::types::{Error, ResourceError};
 use crate::util::{is_valid_resource_name, is_valid_resource_type};
-use crate::{Error, ResourceError};
 
 /// A generic resource.
 #[derive(Clone, Debug, Serialize, Deserialize)]

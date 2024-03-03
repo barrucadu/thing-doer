@@ -12,7 +12,7 @@ use nodelib::etcd::pb::etcdserverpb::{
 };
 use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
-use nodelib::Error;
+use nodelib::types::Error;
 
 /// Mark all inboxed pods on a node as dead
 pub async fn reap_node_inbox(

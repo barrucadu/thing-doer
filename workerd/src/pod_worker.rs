@@ -9,7 +9,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
-use nodelib::Error;
+use nodelib::types::Error;
 
 /// Exit code in case the worker channel closes.
 pub static EXIT_CODE_WORKER_FAILED: i32 = 1;

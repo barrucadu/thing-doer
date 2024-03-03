@@ -8,7 +8,7 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::Resource;
-use nodelib::Error;
+use nodelib::types::Error;
 
 /// A handle to the shared state.
 #[derive(Debug, Clone)]

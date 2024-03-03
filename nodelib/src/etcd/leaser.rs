@@ -10,7 +10,7 @@ use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::{
     LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest,
 };
-use crate::{Error, StreamingError};
+use crate::types::{Error, StreamingError};
 
 /// The timeout waiting for etcd to respond to a ping.
 pub static PONG_TIMEOUT: u64 = 5;
