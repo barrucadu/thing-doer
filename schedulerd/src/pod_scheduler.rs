@@ -1,5 +1,4 @@
 use rand::prelude::SliceRandom;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::process;
 use std::sync::Arc;
@@ -18,7 +17,7 @@ use nodelib::etcd::pb::etcdserverpb::{
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::util;
+use nodelib::resources::Resource;
 use nodelib::Error;
 
 use crate::node_watcher;
@@ -69,7 +68,7 @@ struct WatchState {
     pub my_name: String,
     pub etcd_config: etcd::Config,
     pub node_state: node_watcher::State,
-    pub unscheduled_pods: HashMap<String, (u64, Value)>,
+    pub unscheduled_pods: HashMap<String, (u64, Resource)>,
     pub new_pod_tx: Sender<String>,
 }
 
@@ -82,9 +81,9 @@ impl watcher::Watcher for WatchState {
 
         if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
-                if let Some(value) = util::bytes_to_json(kv.value) {
+                if let Ok(resource) = Resource::try_from(kv.value) {
                     tracing::info!(name, "found new pod");
-                    self.unscheduled_pods.insert(name.to_owned(), (0, value));
+                    self.unscheduled_pods.insert(name.to_owned(), (0, resource));
                     if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
                         tracing::warn!(name, ?error, "could not trigger scheduler");
                     }
@@ -130,7 +129,7 @@ async fn schedule_task(state: Arc<RwLock<WatchState>>, mut new_pod_rx: Receiver<
         let mut w = state.write().await;
         if let Some((retries, resource)) = w.unscheduled_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got schedule request");
-            match schedule_pod(&mut w, pod_name.to_owned(), resource.clone()).await {
+            match schedule_pod(&mut w, resource.clone()).await {
                 ScheduleResult::Ok => (),
                 ScheduleResult::RetryWithoutPenalty => {
                     tracing::warn!(
@@ -144,8 +143,7 @@ async fn schedule_task(state: Arc<RwLock<WatchState>>, mut new_pod_rx: Receiver<
                 ScheduleResult::RetryWithPenalty => {
                     if retries == MAXIMUM_RETRIES {
                         tracing::warn!(pod_name, "could not schedule pod, retry limit reached");
-                        if let Err(error) =
-                            abandon_pod(&w.etcd_config, &w.my_name, &pod_name, resource).await
+                        if let Err(error) = abandon_pod(&w.etcd_config, &w.my_name, resource).await
                         {
                             tracing::warn!(
                                 pod_name,
@@ -186,23 +184,18 @@ enum ScheduleResult {
 }
 
 /// Assign a pod to a worker.
-async fn schedule_pod(state: &mut WatchState, pod_name: String, resource: Value) -> ScheduleResult {
+async fn schedule_pod(state: &mut WatchState, pod: Resource) -> ScheduleResult {
+    // for logging
+    let pod_name = pod.name.clone();
+
     let workers = state.node_state.get_healthy_workers().await;
     if workers.is_empty() {
         tracing::warn!(pod_name, "there are no healthy workers");
         return ScheduleResult::RetryWithoutPenalty;
     }
 
-    if let Some(worker_name) = choose_worker_for_pod(workers, &resource).await {
-        match apply_pod_schedule(
-            &state.etcd_config,
-            &state.my_name,
-            &worker_name,
-            &pod_name,
-            resource,
-        )
-        .await
-        {
+    if let Some(worker_name) = choose_worker_for_pod(workers, &pod).await {
+        match apply_pod_schedule(&state.etcd_config, &state.my_name, &worker_name, pod).await {
             Ok(true) => {
                 tracing::info!(pod_name, worker_name, "scheduled pod to worker");
                 ScheduleResult::Ok
@@ -224,7 +217,7 @@ async fn schedule_pod(state: &mut WatchState, pod_name: String, resource: Value)
 /// Schedule the pod to an arbitrary worker.
 async fn choose_worker_for_pod(
     workers: HashMap<String, node_watcher::NodeState>,
-    _pod_resource: &Value,
+    _pod: &Resource,
 ) -> Option<String> {
     let names = workers.keys().cloned().collect::<Vec<_>>();
     names.choose(&mut rand::thread_rng()).cloned()
@@ -235,46 +228,45 @@ async fn apply_pod_schedule(
     etcd_config: &etcd::Config,
     my_name: &str,
     worker_name: &str,
-    pod_name: &str,
-    mut pod_resource: Value,
+    pod: Resource,
 ) -> Result<bool, Error> {
-    pod_resource["state"] = "scheduled".into();
-    pod_resource["metadata"]["scheduledBy"] = my_name.into();
-    pod_resource["metadata"]["workedBy"] = worker_name.into();
-
-    txn_check_and_schedule(etcd_config, pod_name, Some(worker_name), pod_resource).await
+    txn_check_and_schedule(
+        etcd_config,
+        Some(worker_name),
+        pod.with_state("scheduled")
+            .with_metadata("scheduledBy", my_name.to_owned())
+            .with_metadata("workedBy", worker_name.to_owned()),
+    )
+    .await
 }
 
 /// Mark a pod as abandoned, so no scheduler tries to take it.
 async fn abandon_pod(
     etcd_config: &etcd::Config,
     my_name: &str,
-    pod_name: &str,
-    mut pod_resource: Value,
+    pod: Resource,
 ) -> Result<bool, Error> {
-    pod_resource["state"] = "abandoned".into();
-    pod_resource["metadata"]["scheduledBy"] = my_name.into();
-
-    txn_check_and_schedule(etcd_config, pod_name, None, pod_resource).await
+    txn_check_and_schedule(
+        etcd_config,
+        None,
+        pod.with_state("abandoned")
+            .with_metadata("scheduledBy", my_name.into()),
+    )
+    .await
 }
 
 /// Atomically check if a pod is still unscheduled and if so: delete the
 /// unscheduled flag and write the new resources.
 async fn txn_check_and_schedule(
     etcd_config: &etcd::Config,
-    pod_name: &str,
     worker_name: Option<&str>,
-    pod_resource: Value,
+    pod: Resource,
 ) -> Result<bool, Error> {
     let unscheduled_pod_key = format!(
         "{prefix}{pod_name}",
-        prefix = prefix::unscheduled_pods(etcd_config)
+        prefix = prefix::unscheduled_pods(etcd_config),
+        pod_name = pod.name
     );
-    let pod_resource_key = format!(
-        "{prefix}{pod_name}",
-        prefix = prefix::resource(etcd_config, "pod")
-    );
-    let pod_resource_json = pod_resource.to_string();
 
     // not sure how to check it exists directly, so just check it exists and has
     // lease ID 0 - i.e. no lease.
@@ -295,22 +287,22 @@ async fn txn_check_and_schedule(
             )),
         },
         RequestOp {
-            request: Some(request_op::Request::RequestPut(PutRequest {
-                key: pod_resource_key.into(),
-                value: pod_resource_json.clone().into(),
-                ..Default::default()
-            })),
+            request: Some(request_op::Request::RequestPut(
+                pod.clone().to_put_request(etcd_config),
+            )),
         },
     ];
+
     if let Some(n) = worker_name {
-        let worker_inbox_key = format!(
-            "{prefix}{pod_name}",
-            prefix = prefix::worker_inbox(etcd_config, n)
-        );
         success.push(RequestOp {
             request: Some(request_op::Request::RequestPut(PutRequest {
-                key: worker_inbox_key.into(),
-                value: pod_resource_json.into(),
+                key: format!(
+                    "{prefix}{pod_name}",
+                    prefix = prefix::worker_inbox(etcd_config, n),
+                    pod_name = pod.name
+                )
+                .into(),
+                value: pod.to_json_string().into(),
                 ..Default::default()
             })),
         });

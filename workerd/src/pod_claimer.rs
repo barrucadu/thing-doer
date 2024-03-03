@@ -1,4 +1,3 @@
-use serde_json::Value;
 use std::collections::HashMap;
 use std::process;
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest, RequestOp,
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::util;
+use nodelib::resources::Resource;
 use nodelib::Error;
 
 /// Exit code in case the claimer channel closes.
@@ -30,7 +29,7 @@ pub async fn initialise(
     etcd_config: etcd::Config,
     my_name: String,
     lease_id: LeaseId,
-    work_pod_tx: Sender<(String, Value)>,
+    work_pod_tx: Sender<Resource>,
 ) -> Result<(), Error> {
     let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
 
@@ -66,8 +65,8 @@ pub async fn initialise(
 struct WatchState {
     pub my_name: String,
     pub etcd_config: etcd::Config,
-    pub unclaimed_pods: HashMap<String, Value>,
-    pub unworked_pods: HashMap<String, Value>,
+    pub unclaimed_pods: HashMap<String, Resource>,
+    pub unworked_pods: HashMap<String, Resource>,
     pub new_pod_tx: Sender<String>,
 }
 
@@ -80,9 +79,9 @@ impl watcher::Watcher for WatchState {
 
         if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
-                if let Some(value) = util::bytes_to_json(kv.value) {
+                if let Ok(resource) = Resource::try_from(kv.value) {
                     tracing::info!(name, "found new pod");
-                    self.unclaimed_pods.insert(name.to_owned(), value);
+                    self.unclaimed_pods.insert(name.to_owned(), resource);
                     if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
                         tracing::warn!(name, ?error, "could not trigger claimer");
                     }
@@ -124,7 +123,7 @@ async fn retry_claim_task(state: Arc<RwLock<WatchState>>) {
 
 /// Background task to queue up all unworked pods every `RETRY_INTERVAL`
 /// seconds.
-async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<(String, Value)>) {
+async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<Resource>) {
     loop {
         tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
 
@@ -133,11 +132,11 @@ async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<(St
             let count = w.unworked_pods.len();
             tracing::info!(?count, "retrying unworked pods");
             let mut new_unworked_pods = HashMap::with_capacity(count);
-            for pod in w.unworked_pods.drain() {
-                tracing::info!(name = pod.0, "retrying unworked pod");
+            for (name, pod) in w.unworked_pods.drain() {
+                tracing::info!(name, "retrying unworked pod");
                 if let Err(error) = work_pod_tx.try_send(pod.clone()) {
-                    tracing::warn!(name = pod.0, ?error, "could not trigger worker");
-                    new_unworked_pods.insert(pod.0, pod.1);
+                    tracing::warn!(name, ?error, "could not trigger worker");
+                    new_unworked_pods.insert(name, pod);
                 }
             }
             w.unworked_pods = new_unworked_pods;
@@ -150,17 +149,15 @@ async fn claim_task(
     state: Arc<RwLock<WatchState>>,
     lease_id: LeaseId,
     mut new_pod_rx: Receiver<String>,
-    work_pod_tx: Sender<(String, Value)>,
+    work_pod_tx: Sender<Resource>,
 ) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
         if let Some(resource) = w.unclaimed_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got claim request");
-            match claim_pod(&w, pod_name.to_owned(), lease_id, resource.clone()).await {
+            match claim_pod(&w, lease_id, resource.clone()).await {
                 Ok(resource) => {
-                    if let Err(error) =
-                        work_pod_tx.try_send((pod_name.to_owned(), resource.clone()))
-                    {
+                    if let Err(error) = work_pod_tx.try_send(resource.clone()) {
                         tracing::warn!(pod_name, ?error, "could not work pod, retrying...");
                         w.unworked_pods.insert(pod_name.to_owned(), resource);
                     }
@@ -182,11 +179,10 @@ async fn claim_task(
 /// Update a pod's state to "accepted" and remove it from the inbox.
 async fn claim_pod(
     state: &WatchState,
-    pod_name: String,
     lease_id: LeaseId,
-    mut pod_resource: Value,
-) -> Result<Value, Error> {
-    pod_resource["state"] = "accepted".into();
+    pod: Resource,
+) -> Result<Resource, Error> {
+    let pod = pod.with_state("accepted");
 
     let mut kv_client = state.etcd_config.kv_client().await?;
     kv_client
@@ -198,7 +194,8 @@ async fn claim_pod(
                         DeleteRangeRequest {
                             key: format!(
                                 "{prefix}{pod_name}",
-                                prefix = prefix::worker_inbox(&state.etcd_config, &state.my_name)
+                                prefix = prefix::worker_inbox(&state.etcd_config, &state.my_name),
+                                pod_name = pod.name
                             )
                             .into(),
                             ..Default::default()
@@ -209,7 +206,8 @@ async fn claim_pod(
                     request: Some(request_op::Request::RequestPut(PutRequest {
                         key: format!(
                             "{prefix}{pod_name}",
-                            prefix = prefix::claimed_pods(&state.etcd_config)
+                            prefix = prefix::claimed_pods(&state.etcd_config),
+                            pod_name = pod.name
                         )
                         .into(),
                         value: state.my_name.clone().into(),
@@ -218,20 +216,14 @@ async fn claim_pod(
                     })),
                 },
                 RequestOp {
-                    request: Some(request_op::Request::RequestPut(PutRequest {
-                        key: format!(
-                            "{prefix}{pod_name}",
-                            prefix = prefix::resource(&state.etcd_config, "pod")
-                        )
-                        .into(),
-                        value: pod_resource.to_string().into(),
-                        ..Default::default()
-                    })),
+                    request: Some(request_op::Request::RequestPut(
+                        pod.clone().to_put_request(&state.etcd_config),
+                    )),
                 },
             ],
             failure: Vec::new(),
         }))
         .await?;
 
-    Ok(pod_resource)
+    Ok(pod)
 }

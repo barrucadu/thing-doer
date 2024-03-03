@@ -1,5 +1,4 @@
 use rand::prelude::SliceRandom;
-use serde_json::Value;
 use std::net::{IpAddr, SocketAddr};
 
 /// Characters for encoding to base 36.
@@ -17,6 +16,17 @@ pub fn is_valid_resource_name(name: &str) -> bool {
         && name.chars().all(valid_character)
         && name.starts_with(|c: char| c.is_ascii_alphabetic())
         && !name.ends_with(|c: char| c == '-')
+}
+
+/// Check that a type name is nonempty and of the form
+/// `/[a-z0-9][a-z0-9\.]*[a-z0-9]`.
+pub fn is_valid_resource_type(rtype: &str) -> bool {
+    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '.';
+
+    !rtype.is_empty()
+        && rtype.chars().all(valid_character)
+        && !rtype.starts_with(|c: char| c == '.')
+        && !rtype.ends_with(|c: char| c == '.')
 }
 
 /// Convert a SocketAddr into a resource name / DNS label.
@@ -53,13 +63,4 @@ pub fn encode_number(mut num: u128, digits: &[char]) -> String {
         num = q;
     }
     out
-}
-
-/// Parse some bytes into json.
-pub fn bytes_to_json(bytes: Vec<u8>) -> Option<Value> {
-    if let Ok(json) = String::from_utf8(bytes) {
-        serde_json::from_str::<Value>(&json).ok()
-    } else {
-        None
-    }
 }

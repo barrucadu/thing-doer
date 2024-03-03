@@ -1,4 +1,3 @@
-use serde_json::Value;
 use tokio::sync::mpsc::Sender;
 use tonic::transport::Channel;
 use tonic::Request;
@@ -12,7 +11,7 @@ use nodelib::etcd::pb::etcdserverpb::{
     Compare, DeleteRangeRequest, PutRequest, RangeRequest, RequestOp, TxnRequest,
 };
 use nodelib::etcd::prefix;
-use nodelib::util;
+use nodelib::resources::Resource;
 use nodelib::Error;
 
 /// Mark all inboxed pods on a node as dead
@@ -79,19 +78,25 @@ pub async fn reap_pod(
 
     let version = res.kvs[0].version;
     let bytes = res.kvs[0].value.clone();
-    match util::bytes_to_json(bytes) {
-        Some(mut pod_resource) => {
-            if pod_resource["metadata"]["reapedBy"].as_str().is_some() {
+    match Resource::try_from(bytes) {
+        Ok(pod) => {
+            if pod.metadata.contains_key("reapedBy") {
                 Ok(false)
             } else {
-                pod_resource["state"] = "dead".into();
-                pod_resource["metadata"]["reapedBy"] = my_name.to_owned().into();
-                txn_check_and_set(kv_client, version, key, pod_resource).await
+                txn_check_and_set(
+                    kv_client,
+                    version,
+                    pod.with_state("dead")
+                        .with_metadata("reapedBy", my_name.to_owned())
+                        .to_put_request(etcd_config),
+                )
+                .await
             }
         }
-        None => {
+        Err(error) => {
             tracing::error!(
                 pod_name,
+                ?error,
                 "could not parse pod resource definition, abandoning..."
             );
             Ok(false)
@@ -146,28 +151,23 @@ async fn get_inbox_for_node(
     Ok(to_reap)
 }
 
-/// Atomically check if a key hasn't been updated since we checked it and, if
-/// so, update it.
+/// Atomically check if a resource hasn't been updated since we checked it and,
+/// if so, update it.
 async fn txn_check_and_set(
     mut kv_client: kv_client::KvClient<Channel>,
     version: i64,
-    key: String,
-    value: Value,
+    req: PutRequest,
 ) -> Result<bool, Error> {
     let compare = vec![Compare {
         result: compare::CompareResult::Equal.into(),
         target: compare::CompareTarget::Version.into(),
-        key: key.clone().into(),
+        key: req.key.clone(),
         target_union: Some(compare::TargetUnion::Version(version)),
         ..Default::default()
     }];
 
     let success = vec![RequestOp {
-        request: Some(request_op::Request::RequestPut(PutRequest {
-            key: key.into(),
-            value: value.to_string().into(),
-            ..Default::default()
-        })),
+        request: Some(request_op::Request::RequestPut(req)),
     }];
 
     let res = kv_client

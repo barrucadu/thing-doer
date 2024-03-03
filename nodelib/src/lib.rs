@@ -74,14 +74,9 @@ pub async fn initialise(
         process::exit(EXIT_CODE_INITIALISE_FAILED);
     }
 
-    let spec = serde_json::json!({
-        "type": format!("node.{node_type}"),
-        "name": name,
-        "spec": {
-            "address": address,
-        },
-    });
-    resources::put(&config.etcd, spec).await?;
+    let resource = resources::Resource::new(name.clone(), format!("node.{node_type}"))
+        .with_spec("address", serde_json::json!(address));
+    resources::put(&config.etcd, resource).await?;
 
     let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;
     let alive_lease_id = alive_lease.id;
@@ -168,7 +163,7 @@ impl From<tonic::transport::Error> for Error {
 #[derive(Debug)]
 pub enum ResourceError {
     BadName,
-    BadStructure,
+    BadType,
 }
 
 /// Errors specific to streaming RPCs.

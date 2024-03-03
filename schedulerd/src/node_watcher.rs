@@ -7,7 +7,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::util;
+use nodelib::resources::Resource;
 use nodelib::Error;
 
 /// A handle to the shared state.
@@ -110,10 +110,12 @@ pub struct NodeState {
 
 /// Parse a value as node JSON and extract the address field.
 fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
-    if let Some(value) = util::bytes_to_json(bytes) {
-        if let Some(address_str) = value["spec"]["address"].as_str() {
-            if let Ok(address) = address_str.parse() {
-                return Some(address);
+    if let Ok(resource) = Resource::try_from(bytes) {
+        if let Some(address_value) = resource.spec.get("address") {
+            if let Some(address_str) = address_value.as_str() {
+                if let Ok(address) = address_str.parse() {
+                    return Some(address);
+                }
             }
         }
     }
