@@ -80,7 +80,11 @@ pub async fn reap_pod(
     let bytes = res.kvs[0].value.clone();
     match Resource::try_from(bytes) {
         Ok(pod) => {
-            if pod.metadata.contains_key("reapedBy") {
+            if pod.metadata.contains_key("reapedBy")
+                || pod.state == Some("exit-success".to_string())
+                || pod.state == Some("exit-failure".to_string())
+                || pod.state == Some("errored".to_string())
+            {
                 Ok(false)
             } else {
                 txn_check_and_set(

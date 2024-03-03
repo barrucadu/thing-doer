@@ -107,12 +107,10 @@ async fn reap_task(state: Arc<RwLock<WatchState>>, mut reap_pod_rx: Receiver<Str
         let mut w = state.write().await;
         tracing::info!(pod_name, "got reap request");
         match reap_pod(&w.etcd_config, &w.my_name, &pod_name).await {
-            Ok(true) => {
-                tracing::info!(pod_name, "reaped pod");
-                w.unreaped_pods.remove(&pod_name);
-            }
-            Ok(false) => {
-                tracing::info!(pod_name, "pod already reaped");
+            Ok(reaped) => {
+                if reaped {
+                    tracing::info!(pod_name, "reaped pod");
+                }
                 w.unreaped_pods.remove(&pod_name);
             }
             Err(error) => {

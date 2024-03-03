@@ -6,7 +6,8 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tonic::Request;
 
 use nodelib::etcd;
-use nodelib::etcd::pb::etcdserverpb::PutRequest;
+use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
+use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
 use nodelib::Error;
 
@@ -47,9 +48,21 @@ async fn work_pod(etcd_config: etcd::Config, pod: Resource) {
         }
     };
 
-    let req = pod.with_state(state).to_put_request(&etcd_config);
-    while let Err(error) = try_put_request(&etcd_config, req.clone()).await {
+    let put_req = pod.with_state(state).to_put_request(&etcd_config);
+    while let Err(error) = try_put_request(&etcd_config, &put_req).await {
         tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    let delete_req = DeleteRangeRequest {
+        key: format!(
+            "{prefix}{pod_name}",
+            prefix = prefix::claimed_pods(&etcd_config)
+        )
+        .into(),
+        ..Default::default()
+    };
+    while let Err(error) = try_delete_request(&etcd_config, &delete_req).await {
+        tracing::warn!(pod_name, ?error, "could not delete pod claim, retrying...");
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -73,9 +86,20 @@ async fn run_pod_process(pod: &Resource) -> std::io::Result<bool> {
 }
 
 /// Attempt a put request - `work_pod` retries failures.
-async fn try_put_request(etcd_config: &etcd::Config, req: PutRequest) -> Result<(), Error> {
+async fn try_put_request(etcd_config: &etcd::Config, req: &PutRequest) -> Result<(), Error> {
     let mut kv_client = etcd_config.kv_client().await?;
-    kv_client.put(Request::new(req)).await?;
+    kv_client.put(Request::new(req.clone())).await?;
+
+    Ok(())
+}
+
+/// Attempt a delete request - `work_pod` retries failures.
+async fn try_delete_request(
+    etcd_config: &etcd::Config,
+    req: &DeleteRangeRequest,
+) -> Result<(), Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    kv_client.delete_range(Request::new(req.clone())).await?;
 
     Ok(())
 }
