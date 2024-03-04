@@ -217,10 +217,16 @@ async fn schedule_pod(state: &mut WatchState, pod: Resource) -> ScheduleResult {
 /// Schedule the pod to an arbitrary worker.
 async fn choose_worker_for_pod(
     workers: HashMap<String, node_watcher::NodeState>,
-    _pod: &Resource,
+    pod: &Resource,
 ) -> Option<String> {
-    let names = workers.keys().cloned().collect::<Vec<_>>();
-    names.choose(&mut rand::thread_rng()).cloned()
+    let limits = pod.pod_limits().unwrap_or_default();
+    let mut candidates = Vec::with_capacity(workers.len());
+    for (name, node) in workers.iter() {
+        if limits.cpu_ok(node.available_cpu) && limits.memory_ok(node.available_memory) {
+            candidates.push(name.to_owned());
+        }
+    }
+    candidates.choose(&mut rand::thread_rng()).cloned()
 }
 
 /// Assign a pod to a worker.

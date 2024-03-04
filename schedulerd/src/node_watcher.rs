@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,10 +25,14 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
         etcd_config: etcd_config.clone(),
         worker_nodes: HashMap::new(),
         node_is_healthy: HashMap::new(),
+        node_available_cpu: HashMap::new(),
+        node_available_memory: HashMap::new(),
     }));
 
     let prefixes = &[
         prefix::node_heartbeat_healthy(&etcd_config),
+        prefix::node_available_cpu(&etcd_config),
+        prefix::node_available_memory(&etcd_config),
         prefix::resource(&etcd_config, "node.worker"),
     ];
 
@@ -52,6 +57,8 @@ struct InnerState {
     pub etcd_config: etcd::Config,
     pub worker_nodes: HashMap<String, SocketAddr>,
     pub node_is_healthy: HashMap<String, bool>,
+    pub node_available_cpu: HashMap<String, Decimal>,
+    pub node_available_memory: HashMap<String, u64>,
 }
 
 impl InnerState {
@@ -72,6 +79,8 @@ impl InnerState {
         NodeState {
             address,
             is_healthy: self.node_is_healthy.get(name).copied(),
+            available_cpu: self.node_available_cpu.get(name).copied(),
+            available_memory: self.node_available_memory.get(name).copied(),
         }
     }
 }
@@ -79,6 +88,8 @@ impl InnerState {
 impl watcher::Watcher for InnerState {
     async fn apply_event(&mut self, event: Event) {
         let healthcheck_prefix = prefix::node_heartbeat_healthy(&self.etcd_config);
+        let available_cpu_prefix = prefix::node_available_cpu(&self.etcd_config);
+        let available_memory_prefix = prefix::node_available_memory(&self.etcd_config);
         let resource_prefix = prefix::resource(&self.etcd_config, "node.worker");
 
         let is_create = event.r#type() == EventType::Put;
@@ -88,6 +99,28 @@ impl watcher::Watcher for InnerState {
         if let Some((_, name)) = key.split_once(&healthcheck_prefix) {
             tracing::info!(name, is_healthy = is_create, "node healthy check changed");
             self.node_is_healthy.insert(name.to_owned(), is_create);
+        } else if let Some((_, name)) = key.split_once(&available_cpu_prefix) {
+            if is_create {
+                if let Some(cpu) = decimal_from_bytes(kv.value) {
+                    tracing::info!(name, ?cpu, "node available cpu changed");
+                    self.node_available_cpu.insert(name.to_owned(), cpu);
+                } else {
+                    tracing::warn!(name, "could not parse node available cpu definition");
+                }
+            } else {
+                self.node_available_cpu.remove(name);
+            }
+        } else if let Some((_, name)) = key.split_once(&available_memory_prefix) {
+            if is_create {
+                if let Some(memory) = u64_from_bytes(kv.value) {
+                    tracing::info!(name, ?memory, "node available memory changed");
+                    self.node_available_memory.insert(name.to_owned(), memory);
+                } else {
+                    tracing::warn!(name, "could not parse node available memory definition");
+                }
+            } else {
+                self.node_available_memory.remove(name);
+            }
         } else if let Some((_, name)) = key.split_once(&resource_prefix) {
             if let Some(address) = address_from_node_json(kv.value) {
                 tracing::info!(name, ?address, "found worker node");
@@ -106,19 +139,27 @@ impl watcher::Watcher for InnerState {
 pub struct NodeState {
     pub address: SocketAddr,
     pub is_healthy: Option<bool>,
+    pub available_cpu: Option<Decimal>,
+    pub available_memory: Option<u64>,
 }
 
 /// Parse a value as node JSON and extract the address field.
 fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
-    if let Ok(resource) = Resource::try_from(bytes) {
-        if let Some(address_value) = resource.spec.get("address") {
-            if let Some(address_str) = address_value.as_str() {
-                if let Ok(address) = address_str.parse() {
-                    return Some(address);
-                }
-            }
-        }
-    }
+    let resource = Resource::try_from(bytes).ok()?;
+    let address_value = resource.spec.get("address")?;
+    let address_str = address_value.as_str()?;
 
-    None
+    address_str.parse().ok()
+}
+
+/// Parse a value as a `Decimal`
+fn decimal_from_bytes(bytes: Vec<u8>) -> Option<Decimal> {
+    let s = String::from_utf8(bytes).ok()?;
+    Decimal::from_str_exact(&s).ok()
+}
+
+/// Parse a value as a `u64`
+fn u64_from_bytes(bytes: Vec<u8>) -> Option<u64> {
+    let s = String::from_utf8(bytes).ok()?;
+    s.parse().ok()
 }

@@ -21,6 +21,18 @@ pub fn worker_inbox(config: &Config, worker: &str) -> String {
     )
 }
 
+/// Prefix under which a node's available CPU for pods is written.  Keys are
+/// node names, values are `Decimal`s.
+pub fn node_available_cpu(config: &Config) -> String {
+    format!("{prefix}/node/limits/cpu/", prefix = config.prefix)
+}
+
+/// Prefix under which a node's available memory for pods is written.  Keys are
+/// node names, values are `u64`s.
+pub fn node_available_memory(config: &Config) -> String {
+    format!("{prefix}/node/limits/memory/", prefix = config.prefix)
+}
+
 /// Prefix under which node "healthy" checks are written.  Keys are node names,
 /// values are arbitrary.
 pub fn node_heartbeat_healthy(config: &Config) -> String {

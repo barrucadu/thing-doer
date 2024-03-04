@@ -11,23 +11,32 @@ use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
 use nodelib::types::{Error, PodState};
 
+use crate::limits;
+
 /// Exit code in case the worker channel closes.
 pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
 
 /// Start background tasks to work pods.
-pub async fn initialise(etcd_config: etcd::Config) -> Result<Sender<Resource>, Error> {
+pub async fn initialise(
+    etcd_config: etcd::Config,
+    limit_state: limits::State,
+) -> Result<Sender<Resource>, Error> {
     let (work_pod_tx, work_pod_rx) = mpsc::channel(128);
 
-    tokio::spawn(work_task(etcd_config, work_pod_rx));
+    tokio::spawn(work_task(etcd_config, limit_state, work_pod_rx));
 
     Ok(work_pod_tx)
 }
 
 /// Background task to work pods.
-async fn work_task(etcd_config: etcd::Config, mut work_pod_rx: Receiver<Resource>) {
+async fn work_task(
+    etcd_config: etcd::Config,
+    limit_state: limits::State,
+    mut work_pod_rx: Receiver<Resource>,
+) {
     while let Some(pod) = work_pod_rx.recv().await {
         tracing::info!(pod_name = pod.name, "spawned worker task");
-        tokio::spawn(work_pod(etcd_config.clone(), pod));
+        tokio::spawn(work_pod(etcd_config.clone(), limit_state.clone(), pod));
     }
 
     tracing::error!("worker channel unexpectedly closed, termianting...");
@@ -35,9 +44,15 @@ async fn work_task(etcd_config: etcd::Config, mut work_pod_rx: Receiver<Resource
 }
 
 /// Proof-of-concept pod-worker
-async fn work_pod(etcd_config: etcd::Config, pod: Resource) {
+async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod: Resource) {
     // for logging
     let pod_name = pod.name.clone();
+
+    let pod_limits = pod.pod_limits().unwrap_or_default();
+    let committed = limit_state.claim_resources(pod_limits).await;
+    if committed.is_none() {
+        tracing::warn!(pod_name, "overcommitted resources");
+    }
 
     let state = match run_pod_process(&pod).await {
         Ok(true) => PodState::ExitSuccess,
@@ -66,6 +81,10 @@ async fn work_pod(etcd_config: etcd::Config, pod: Resource) {
     while let Err(error) = try_delete_request(&etcd_config, &delete_req).await {
         tracing::warn!(pod_name, ?error, "could not delete pod claim, retrying...");
         tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+    if let Some(to_free) = committed {
+        limit_state.release_resources(to_free).await;
     }
 }
 

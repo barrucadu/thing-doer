@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -6,7 +7,7 @@ use tonic::Request;
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
-use crate::types::{Error, ResourceError};
+use crate::types::{Error, PodLimits, ResourceError};
 use crate::util::{is_valid_resource_name, is_valid_resource_type};
 
 /// A generic resource.
@@ -89,6 +90,32 @@ impl Resource {
             key: self.key(etcd_config).into(),
             value: self.to_json_string().into(),
             ..Default::default()
+        }
+    }
+
+    /// If a resource is a pod, get its resource spec.
+    pub fn pod_limits(&self) -> Option<PodLimits> {
+        if self.rtype == *"pod" {
+            if let Some(resources) = self.spec.get("resources") {
+                let cpu = |v: &Value| v["cpu"].as_f64().and_then(|n| Decimal::try_from(n).ok());
+                let mem = |v: &Value| v["memory"].as_u64();
+
+                Some(PodLimits {
+                    requested_cpu: cpu(&resources["requests"]),
+                    maximum_cpu: cpu(&resources["limits"]),
+                    requested_memory: mem(&resources["requests"]),
+                    maximum_memory: mem(&resources["limits"]),
+                })
+            } else {
+                Some(PodLimits {
+                    requested_cpu: None,
+                    maximum_cpu: None,
+                    requested_memory: None,
+                    maximum_memory: None,
+                })
+            }
+        } else {
+            None
         }
     }
 }

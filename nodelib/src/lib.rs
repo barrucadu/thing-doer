@@ -4,6 +4,7 @@ pub mod resources;
 pub mod types;
 pub mod util;
 
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
@@ -46,6 +47,7 @@ pub struct Config {
 pub async fn initialise(
     config: Config,
     node_type: NodeType,
+    spec: &[(&str, Value)],
 ) -> Result<(String, leaser::LeaseId), Error> {
     let address = config.advertise_address.unwrap_or(config.listen_address);
     let name = config.name.unwrap_or(util::sockaddr_to_name(address));
@@ -58,8 +60,13 @@ pub async fn initialise(
         process::exit(EXIT_CODE_INITIALISE_FAILED);
     }
 
-    let resource = resources::Resource::new(name.clone(), format!("node.{node_type}"))
+    let mut resource = resources::Resource::new(name.clone(), format!("node.{node_type}"))
         .with_spec("address", serde_json::json!(address));
+
+    for (k, v) in spec {
+        resource = resource.with_spec(k, v.clone());
+    }
+
     resources::put(&config.etcd, resource).await?;
 
     let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;
