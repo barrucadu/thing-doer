@@ -12,7 +12,7 @@ use nodelib::etcd::pb::etcdserverpb::{
 };
 use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
-use nodelib::types::Error;
+use nodelib::types::{Error, PodState};
 
 /// Mark all inboxed pods on a node as dead
 pub async fn reap_node_inbox(
@@ -81,16 +81,18 @@ pub async fn reap_pod(
     match Resource::try_from(bytes) {
         Ok(pod) => {
             if pod.metadata.contains_key("reapedBy")
-                || pod.state == Some("exit-success".to_string())
-                || pod.state == Some("exit-failure".to_string())
-                || pod.state == Some("errored".to_string())
+                || pod
+                    .state
+                    .as_deref()
+                    .and_then(PodState::from_resource_state)
+                    .map_or(false, |s| s.is_terminal())
             {
                 Ok(false)
             } else {
                 txn_check_and_set(
                     kv_client,
                     version,
-                    pod.with_state("dead")
+                    pod.with_state(PodState::Dead.to_resource_state())
                         .with_metadata("reapedBy", my_name.to_owned())
                         .to_put_request(etcd_config),
                 )

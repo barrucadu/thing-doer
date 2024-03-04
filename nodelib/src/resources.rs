@@ -40,8 +40,8 @@ impl Resource {
     }
 
     /// Set the state, overwriting any existing value.
-    pub fn with_state(mut self, state: &str) -> Self {
-        self.state = Some(state.to_owned());
+    pub fn with_state(mut self, state: String) -> Self {
+        self.state = Some(state);
         self
     }
 

@@ -15,7 +15,7 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::Resource;
-use nodelib::types::Error;
+use nodelib::types::{Error, PodState};
 
 /// Exit code in case the claimer channel closes.
 pub static EXIT_CODE_CLAIMER_FAILED: i32 = 1;
@@ -182,7 +182,7 @@ async fn claim_pod(
     lease_id: LeaseId,
     pod: Resource,
 ) -> Result<Resource, Error> {
-    let pod = pod.with_state("accepted");
+    let pod = pod.with_state(PodState::Accepted.to_resource_state());
 
     let mut kv_client = state.etcd_config.kv_client().await?;
     kv_client

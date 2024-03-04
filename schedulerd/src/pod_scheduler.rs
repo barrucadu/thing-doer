@@ -18,7 +18,7 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::Resource;
-use nodelib::types::Error;
+use nodelib::types::{Error, PodState};
 
 use crate::node_watcher;
 
@@ -233,7 +233,7 @@ async fn apply_pod_schedule(
     txn_check_and_schedule(
         etcd_config,
         Some(worker_name),
-        pod.with_state("scheduled")
+        pod.with_state(PodState::Scheduled.to_resource_state())
             .with_metadata("scheduledBy", my_name.to_owned())
             .with_metadata("workedBy", worker_name.to_owned()),
     )
@@ -249,7 +249,7 @@ async fn abandon_pod(
     txn_check_and_schedule(
         etcd_config,
         None,
-        pod.with_state("abandoned")
+        pod.with_state(PodState::Abandoned.to_resource_state())
             .with_metadata("scheduledBy", my_name.into()),
     )
     .await

@@ -9,7 +9,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use nodelib::etcd::prefix;
 use nodelib::resources::Resource;
-use nodelib::types::Error;
+use nodelib::types::{Error, PodState};
 
 /// Exit code in case the worker channel closes.
 pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
@@ -40,15 +40,17 @@ async fn work_pod(etcd_config: etcd::Config, pod: Resource) {
     let pod_name = pod.name.clone();
 
     let state = match run_pod_process(&pod).await {
-        Ok(true) => "exit-success",
-        Ok(false) => "exit-failure",
+        Ok(true) => PodState::ExitSuccess,
+        Ok(false) => PodState::ExitFailure,
         Err(error) => {
             tracing::warn!(pod_name, ?error, "pod errored");
-            "errored"
+            PodState::Errored
         }
     };
 
-    let put_req = pod.with_state(state).to_put_request(&etcd_config);
+    let put_req = pod
+        .with_state(state.to_resource_state())
+        .to_put_request(&etcd_config);
     while let Err(error) = try_put_request(&etcd_config, &put_req).await {
         tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
         tokio::time::sleep(Duration::from_secs(5)).await;

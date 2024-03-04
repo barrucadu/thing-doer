@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The type of a node.
@@ -15,6 +16,54 @@ impl fmt::Display for NodeType {
             Self::Scheduler => write!(f, "scheduler"),
             Self::Worker => write!(f, "worker"),
         }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// The state of a pod resource.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PodState {
+    /// Initial state
+    Created,
+    /// Assigned to a worker
+    Scheduled,
+    /// Could not be assigned to a worker within the retry limit
+    Abandoned,
+    /// Picked up by a worker but not yet started
+    Accepted,
+    /// Exited with a successful exit code
+    ExitSuccess,
+    /// Exited with an unsuccessful exit code
+    ExitFailure,
+    /// Failed to start
+    Errored,
+    /// Presumed dead, due to worker failure
+    Dead,
+}
+
+impl PodState {
+    /// True if this is a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Abandoned
+            | Self::ExitSuccess
+            | Self::ExitFailure
+            | Self::Errored
+            | Self::Dead => true,
+            Self::Created | Self::Scheduled | Self::Accepted => false,
+        }
+    }
+
+    /// Turn this to a resource `state`.
+    pub fn to_resource_state(&self) -> String {
+        serde_plain::to_string(self).unwrap()
+    }
+
+    /// Parse this from a resource `state`.
+    pub fn from_resource_state(s: &str) -> Option<Self> {
+        serde_plain::from_str(s).ok()
     }
 }
 
