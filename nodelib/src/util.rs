@@ -37,14 +37,9 @@ pub fn sockaddr_to_name(addr: SocketAddr) -> String {
     };
     let address_str = encode_number(u128::from_be_bytes(ipv6.octets()), BASE36_DIGITS);
     let port_str = encode_number(addr.port().into(), BASE36_DIGITS);
+    let suffix = random_string(4);
 
-    let mut rng = rand::thread_rng();
-    let r1 = BASE36_DIGITS.choose(&mut rng).unwrap();
-    let r2 = BASE36_DIGITS.choose(&mut rng).unwrap();
-    let r3 = BASE36_DIGITS.choose(&mut rng).unwrap();
-    let r4 = BASE36_DIGITS.choose(&mut rng).unwrap();
-
-    format!("a{address_str}-p{port_str}-{r1}{r2}{r3}{r4}")
+    format!("a{address_str}-p{port_str}-{suffix}")
 }
 
 /// Encode a number with a given digit sequence.
@@ -61,6 +56,16 @@ pub fn encode_number(mut num: u128, digits: &[char]) -> String {
         let r = num % b;
         out.insert(0, digits[r as usize]);
         num = q;
+    }
+    out
+}
+
+/// Generate a random alphanumeric string.
+pub fn random_string(len: usize) -> String {
+    let mut rng = rand::thread_rng();
+    let mut out = String::with_capacity(len);
+    for _ in 0..len {
+        out.push(*BASE36_DIGITS.choose(&mut rng).unwrap());
     }
     out
 }
