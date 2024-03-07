@@ -53,6 +53,15 @@ async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod
         tracing::warn!(pod_name, "overcommitted resources");
     }
 
+    let put_req = pod
+        .clone()
+        .with_state(PodState::Running.to_resource_state())
+        .to_put_request(&etcd_config);
+    while let Err(error) = try_put_request(&etcd_config, &put_req).await {
+        tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
     let state = match run_pod_process(&pod).await {
         Ok(true) => PodState::ExitSuccess,
         Ok(false) => PodState::ExitFailure,
@@ -69,6 +78,7 @@ async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod
         tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
+
     let delete_req = DeleteRangeRequest {
         key: format!(
             "{prefix}{pod_name}",

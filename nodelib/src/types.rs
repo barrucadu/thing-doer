@@ -33,6 +33,8 @@ pub enum PodState {
     Abandoned,
     /// Picked up by a worker but not yet started
     Accepted,
+    /// Running, not yet terminated
+    Running,
     /// Exited with a successful exit code
     ExitSuccess,
     /// Exited with an unsuccessful exit code
@@ -52,7 +54,7 @@ impl PodState {
             | Self::ExitFailure
             | Self::Errored
             | Self::Dead => true,
-            Self::Created | Self::Scheduled | Self::Accepted => false,
+            Self::Created | Self::Scheduled | Self::Accepted | Self::Running => false,
         }
     }
 
