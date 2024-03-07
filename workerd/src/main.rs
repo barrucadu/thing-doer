@@ -1,5 +1,6 @@
 use clap::Parser;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 use std::process;
 
 use nodelib::types::NodeType;
@@ -33,13 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (name, lease_id) = nodelib::initialise(
         config.node,
         NodeType::Worker,
-        &[(
-            "limits",
-            serde_json::json!({
-                "cpu": config.cpu,
-                "memory": config.memory,
-            }),
-        )],
+        HashMap::from([(
+            "limits".to_owned(),
+            serde_json::json!({"cpu": config.cpu, "memory": config.memory}),
+        )]),
     )
     .await?;
 

@@ -1,4 +1,6 @@
 use clap::Parser;
+use rust_decimal::Decimal;
+use std::collections::HashMap;
 use std::time::Duration;
 use tonic::Request;
 
@@ -6,6 +8,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::PutRequest;
 use nodelib::etcd::prefix;
 use nodelib::resources;
+use nodelib::resources::pod::*;
 use nodelib::resources::Resource;
 use nodelib::types::PodState;
 use nodelib::util;
@@ -48,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "/run/current-system/sw/bin/false",
         "/run/current-system/sw/bin/env",
     ];
-    let cpus = &[0.1, 0.3];
+    let cpus = &[Decimal::new(1, 1), Decimal::new(3, 1)];
     let mems = &[16, 64, 128];
     let mut idx = 0;
     loop {
@@ -58,18 +61,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mem = mems[idx % mems.len()];
         tracing::info!(pod_name, cmd, ?cpu, ?mem, "create");
 
-        let pod = Resource::new(pod_name, "pod".to_owned())
+        let spec = PodSpec {
+            containers: vec![PodContainerSpec {
+                image: "no-such-image".to_owned(),
+                entrypoint: Some(cmd.to_owned()),
+                cmd: Vec::new(),
+                env: HashMap::from([
+                    ("FOO".to_owned(), "1".to_owned()),
+                    ("BAR".to_owned(), "2".to_owned()),
+                ]),
+                ports: Vec::new(),
+                resources: Some(ContainerResourceSpec {
+                    requests: Some(ContainerResourceSpecInner {
+                        cpu: Some(cpu),
+                        memory: Some(mem),
+                    }),
+                    limits: None,
+                }),
+            }],
+        };
+        let specv = serde_json::to_value(spec).unwrap();
+        let specm = serde_json::from_value::<HashMap<_, _>>(specv).unwrap();
+        let pod = Resource::new(pod_name.clone(), "pod".to_owned(), specm)
             .with_state(PodState::Created.to_resource_state())
-            .with_metadata("createdBy", name.clone())
-            .with_spec("cmd", serde_json::json!(cmd))
-            .with_spec("env", serde_json::json!({ "FOO": "1", "BAR": "2" }))
-            .with_spec(
-                "resources",
-                serde_json::json!({ "requests": {
-                    "cpu": cpu,
-                    "memory": mem,
-                }}),
-            );
+            .with_metadata("createdBy", name.clone());
 
         let mut kv_client = config.etcd.kv_client().await?;
         resources::put(&config.etcd, pod.clone()).await?;
@@ -78,7 +93,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 key: format!(
                     "{prefix}{pod_name}",
                     prefix = prefix::unscheduled_pods(&config.etcd),
-                    pod_name = pod.name
                 )
                 .into(),
                 value: pod.to_json_string().into(),

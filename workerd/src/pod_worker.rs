@@ -8,7 +8,7 @@ use tonic::Request;
 use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use nodelib::etcd::prefix;
-use nodelib::resources::Resource;
+use nodelib::resources::PodResource;
 use nodelib::types::{Error, PodState};
 
 use crate::limits;
@@ -20,7 +20,7 @@ pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
 pub async fn initialise(
     etcd_config: etcd::Config,
     limit_state: limits::State,
-) -> Result<Sender<Resource>, Error> {
+) -> Result<Sender<PodResource>, Error> {
     let (work_pod_tx, work_pod_rx) = mpsc::channel(128);
 
     tokio::spawn(work_task(etcd_config, limit_state, work_pod_rx));
@@ -32,7 +32,7 @@ pub async fn initialise(
 async fn work_task(
     etcd_config: etcd::Config,
     limit_state: limits::State,
-    mut work_pod_rx: Receiver<Resource>,
+    mut work_pod_rx: Receiver<PodResource>,
 ) {
     while let Some(pod) = work_pod_rx.recv().await {
         tracing::info!(pod_name = pod.name, "spawned worker task");
@@ -44,12 +44,11 @@ async fn work_task(
 }
 
 /// Proof-of-concept pod-worker
-async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod: Resource) {
+async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod: PodResource) {
     // for logging
     let pod_name = pod.name.clone();
 
-    let pod_limits = pod.pod_limits().unwrap_or_default();
-    let committed = limit_state.claim_resources(pod_limits).await;
+    let committed = limit_state.claim_resources(&pod).await;
     if committed.is_none() {
         tracing::warn!(pod_name, "overcommitted resources");
     }
@@ -89,16 +88,18 @@ async fn work_pod(etcd_config: etcd::Config, mut limit_state: limits::State, pod
 }
 
 /// Run the pod process and return whether it exited successfully or not.
-async fn run_pod_process(pod: &Resource) -> std::io::Result<bool> {
-    let mut pod_cmd = Command::new(pod.spec["cmd"].as_str().unwrap());
+async fn run_pod_process(pod: &PodResource) -> std::io::Result<bool> {
+    // TODO: properly run pods
+    let container = &pod.spec.containers[0];
+
+    let mut pod_cmd = Command::new(container.entrypoint.clone().unwrap());
     let command = pod_cmd
         .env_clear()
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
-    if let Some(env) = pod.spec["env"].as_object() {
-        for (ename, eval) in env {
-            command.env(ename, eval.as_str().unwrap());
-        }
+
+    for (ename, eval) in &container.env {
+        command.env(ename, eval);
     }
 
     let exit_status = command.spawn()?.wait().await?;

@@ -1,18 +1,19 @@
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use tonic::Request;
 
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
-use crate::types::{Error, PodLimits, ResourceError};
+use crate::types::ResourceError;
 use crate::util::{is_valid_resource_name, is_valid_resource_type};
 
-/// A generic resource.
+/// A resource where the spec is a JSON object.
+pub type Resource = GenericResource<HashMap<String, Value>>;
+
+/// A resource, generic over the spec type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Resource {
+pub struct GenericResource<T> {
     /// Name - must be a valid DNS label and globally unique for the type.
     pub name: String,
     /// Type - must consist of just alphanums and dots.
@@ -25,18 +26,18 @@ pub struct Resource {
     #[serde(default)]
     pub metadata: HashMap<String, String>,
     /// Spec - type-specific resource definition.
-    pub spec: HashMap<String, Value>,
+    pub spec: T,
 }
 
-impl Resource {
+impl<T: Serialize> GenericResource<T> {
     /// Construct a resource out of just a name and a type.
-    pub fn new(name: String, rtype: String) -> Self {
+    pub fn new(name: String, rtype: String, spec: T) -> Self {
         Self {
             name,
             rtype,
             state: None,
             metadata: HashMap::new(),
-            spec: HashMap::new(),
+            spec,
         }
     }
 
@@ -49,12 +50,6 @@ impl Resource {
     /// Set a metadata key, overwriting any existing value.
     pub fn with_metadata(mut self, key: &str, value: String) -> Self {
         self.metadata.insert(key.to_owned(), value);
-        self
-    }
-
-    /// Set a spec key, overwriting any existing value.
-    pub fn with_spec(mut self, key: &str, value: Value) -> Self {
-        self.spec.insert(key.to_owned(), value);
         self
     }
 
@@ -90,32 +85,6 @@ impl Resource {
             key: self.key(etcd_config).into(),
             value: self.to_json_string().into(),
             ..Default::default()
-        }
-    }
-
-    /// If a resource is a pod, get its resource spec.
-    pub fn pod_limits(&self) -> Option<PodLimits> {
-        if self.rtype == *"pod" {
-            if let Some(resources) = self.spec.get("resources") {
-                let cpu = |v: &Value| v["cpu"].as_f64().and_then(|n| Decimal::try_from(n).ok());
-                let mem = |v: &Value| v["memory"].as_u64();
-
-                Some(PodLimits {
-                    requested_cpu: cpu(&resources["requests"]),
-                    maximum_cpu: cpu(&resources["limits"]),
-                    requested_memory: mem(&resources["requests"]),
-                    maximum_memory: mem(&resources["limits"]),
-                })
-            } else {
-                Some(PodLimits {
-                    requested_cpu: None,
-                    maximum_cpu: None,
-                    requested_memory: None,
-                    maximum_memory: None,
-                })
-            }
-        } else {
-            None
         }
     }
 }
@@ -157,31 +126,5 @@ impl TryFrom<Vec<u8>> for Resource {
         resource.validate()?;
 
         Ok(resource)
-    }
-}
-
-/// Persist a new resource to etcd.
-///
-/// The resource json must have `type`, `name`, and `spec` fields, and the
-/// `name` must be a valid DNS label:
-///
-/// - 1 to 63 characters
-/// - Contains only ASCII letters, digits, and hyphens
-/// - Starts with a letter
-/// - Does not end with a hyphen
-pub async fn put(etcd_config: &etcd::Config, resource: Resource) -> Result<(), Error> {
-    resource.validate()?;
-
-    let mut kv_client = etcd_config.kv_client().await?;
-    let res = kv_client
-        .put(Request::new(resource.clone().to_put_request(etcd_config)))
-        .await;
-
-    match res {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            tracing::warn!(?error, ?resource, "could not put resource");
-            Err(error.into())
-        }
     }
 }

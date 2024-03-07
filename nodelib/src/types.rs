@@ -1,4 +1,3 @@
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -65,37 +64,6 @@ impl PodState {
     /// Parse this from a resource `state`.
     pub fn from_resource_state(s: &str) -> Option<Self> {
         serde_plain::from_str(s).ok()
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-/// The requested / maximum resources of a pod.
-#[derive(Debug, Default)]
-pub struct PodLimits {
-    pub requested_cpu: Option<Decimal>,
-    pub maximum_cpu: Option<Decimal>,
-    pub requested_memory: Option<u64>,
-    pub maximum_memory: Option<u64>,
-}
-
-impl PodLimits {
-    /// Check if an available amount of CPU meets the requested amount.
-    pub fn cpu_ok(&self, available_cpu: Option<Decimal>) -> bool {
-        if let Some(requested) = self.requested_cpu {
-            available_cpu.map_or(false, |available| available >= requested)
-        } else {
-            true
-        }
-    }
-
-    /// Check if an available amount of memory meets the requested amount.
-    pub fn memory_ok(&self, available_memory: Option<u64>) -> bool {
-        if let Some(requested) = self.requested_memory {
-            available_memory.map_or(false, |available| available >= requested)
-        } else {
-            true
-        }
     }
 }
 

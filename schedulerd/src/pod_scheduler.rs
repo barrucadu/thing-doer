@@ -17,7 +17,7 @@ use nodelib::etcd::pb::etcdserverpb::{
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::resources::Resource;
+use nodelib::resources::PodResource;
 use nodelib::types::{Error, PodState};
 
 use crate::node_watcher;
@@ -68,7 +68,7 @@ struct WatchState {
     pub my_name: String,
     pub etcd_config: etcd::Config,
     pub node_state: node_watcher::State,
-    pub unscheduled_pods: HashMap<String, (u64, Resource)>,
+    pub unscheduled_pods: HashMap<String, (u64, PodResource)>,
     pub new_pod_tx: Sender<String>,
 }
 
@@ -81,7 +81,7 @@ impl watcher::Watcher for WatchState {
 
         if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
-                if let Ok(resource) = Resource::try_from(kv.value) {
+                if let Ok(resource) = PodResource::try_from(kv.value) {
                     tracing::info!(name, "found new pod");
                     self.unscheduled_pods.insert(name.to_owned(), (0, resource));
                     if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
@@ -184,7 +184,7 @@ enum ScheduleResult {
 }
 
 /// Assign a pod to a worker.
-async fn schedule_pod(state: &mut WatchState, pod: Resource) -> ScheduleResult {
+async fn schedule_pod(state: &mut WatchState, pod: PodResource) -> ScheduleResult {
     // for logging
     let pod_name = pod.name.clone();
 
@@ -217,9 +217,9 @@ async fn schedule_pod(state: &mut WatchState, pod: Resource) -> ScheduleResult {
 /// Schedule the pod to an arbitrary worker.
 async fn choose_worker_for_pod(
     workers: HashMap<String, node_watcher::NodeState>,
-    pod: &Resource,
+    pod: &PodResource,
 ) -> Option<String> {
-    let limits = pod.pod_limits().unwrap_or_default();
+    let limits = pod.spec.aggregate_resources();
     let mut candidates = Vec::with_capacity(workers.len());
     for (name, node) in workers.iter() {
         if limits.cpu_ok(node.available_cpu) && limits.memory_ok(node.available_memory) {
@@ -234,7 +234,7 @@ async fn apply_pod_schedule(
     etcd_config: &etcd::Config,
     my_name: &str,
     worker_name: &str,
-    pod: Resource,
+    pod: PodResource,
 ) -> Result<bool, Error> {
     txn_check_and_schedule(
         etcd_config,
@@ -250,7 +250,7 @@ async fn apply_pod_schedule(
 async fn abandon_pod(
     etcd_config: &etcd::Config,
     my_name: &str,
-    pod: Resource,
+    pod: PodResource,
 ) -> Result<bool, Error> {
     txn_check_and_schedule(
         etcd_config,
@@ -266,7 +266,7 @@ async fn abandon_pod(
 async fn txn_check_and_schedule(
     etcd_config: &etcd::Config,
     worker_name: Option<&str>,
-    pod: Resource,
+    pod: PodResource,
 ) -> Result<bool, Error> {
     let unscheduled_pod_key = format!(
         "{prefix}{pod_name}",

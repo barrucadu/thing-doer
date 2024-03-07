@@ -13,7 +13,8 @@ use nodelib::etcd::leaser::LeaseId;
 use nodelib::etcd::pb::etcdserverpb::request_op;
 use nodelib::etcd::pb::etcdserverpb::{PutRequest, RequestOp, TxnRequest};
 use nodelib::etcd::prefix;
-use nodelib::types::{Error, PodLimits};
+use nodelib::resources::PodResource;
+use nodelib::types::Error;
 
 /// Exit code in case the limit channel closes.
 pub static EXIT_CODE_LIMITER_FAILED: i32 = 1;
@@ -74,18 +75,19 @@ impl State {
     /// Work out how many resources to allocate for a pod (return `None` if
     /// there aren't enough resources available), and update the node state in
     /// etcd.
-    pub async fn claim_resources(
-        &mut self,
-        pod_limits: PodLimits,
-    ) -> Option<CommittedPodResources> {
-        let min_cpu = pod_limits
-            .requested_cpu
+    pub async fn claim_resources(&mut self, pod: &PodResource) -> Option<CommittedPodResources> {
+        let agg = pod.spec.aggregate_resources();
+        let requests = agg.requests.unwrap();
+        let limits = agg.limits.unwrap();
+
+        let min_cpu = requests
+            .cpu
             .unwrap_or(Decimal::from_str_exact(DEFAULT_MIN_CPU).unwrap());
-        let max_cpu = pod_limits
-            .maximum_cpu
+        let max_cpu = limits
+            .cpu
             .unwrap_or(Decimal::from_str_exact(DEFAULT_MAX_CPU).unwrap());
-        let min_memory = pod_limits.requested_memory.unwrap_or(DEFAULT_MIN_MEMORY);
-        let max_memory = pod_limits.maximum_memory.unwrap_or(DEFAULT_MAX_MEMORY);
+        let min_memory = requests.memory.unwrap_or(DEFAULT_MIN_MEMORY);
+        let max_memory = limits.memory.unwrap_or(DEFAULT_MAX_MEMORY);
 
         let mut w = self.0.write().await;
         if min_cpu <= w.available_cpu && min_memory <= w.available_memory {

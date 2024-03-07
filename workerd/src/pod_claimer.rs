@@ -14,7 +14,7 @@ use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest, RequestOp,
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::resources::Resource;
+use nodelib::resources::PodResource;
 use nodelib::types::{Error, PodState};
 
 /// Exit code in case the claimer channel closes.
@@ -29,7 +29,7 @@ pub async fn initialise(
     etcd_config: etcd::Config,
     my_name: String,
     lease_id: LeaseId,
-    work_pod_tx: Sender<Resource>,
+    work_pod_tx: Sender<PodResource>,
 ) -> Result<(), Error> {
     let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
 
@@ -65,8 +65,8 @@ pub async fn initialise(
 struct WatchState {
     pub my_name: String,
     pub etcd_config: etcd::Config,
-    pub unclaimed_pods: HashMap<String, Resource>,
-    pub unworked_pods: HashMap<String, Resource>,
+    pub unclaimed_pods: HashMap<String, PodResource>,
+    pub unworked_pods: HashMap<String, PodResource>,
     pub new_pod_tx: Sender<String>,
 }
 
@@ -79,7 +79,7 @@ impl watcher::Watcher for WatchState {
 
         if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
-                if let Ok(resource) = Resource::try_from(kv.value) {
+                if let Ok(resource) = PodResource::try_from(kv.value) {
                     tracing::info!(name, "found new pod");
                     self.unclaimed_pods.insert(name.to_owned(), resource);
                     if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
@@ -123,7 +123,7 @@ async fn retry_claim_task(state: Arc<RwLock<WatchState>>) {
 
 /// Background task to queue up all unworked pods every `RETRY_INTERVAL`
 /// seconds.
-async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<Resource>) {
+async fn retry_work_task(state: Arc<RwLock<WatchState>>, work_pod_tx: Sender<PodResource>) {
     loop {
         tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
 
@@ -149,7 +149,7 @@ async fn claim_task(
     state: Arc<RwLock<WatchState>>,
     lease_id: LeaseId,
     mut new_pod_rx: Receiver<String>,
-    work_pod_tx: Sender<Resource>,
+    work_pod_tx: Sender<PodResource>,
 ) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
@@ -180,8 +180,8 @@ async fn claim_task(
 async fn claim_pod(
     state: &WatchState,
     lease_id: LeaseId,
-    pod: Resource,
-) -> Result<Resource, Error> {
+    pod: PodResource,
+) -> Result<PodResource, Error> {
     let pod = pod.with_state(PodState::Accepted.to_resource_state());
 
     let mut kv_client = state.etcd_config.kv_client().await?;
