@@ -44,13 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         suffix = util::random_string(8)
     );
 
-    let cmds = &[
-        "/run/current-system/sw/bin/no-such-command",
-        "/run/current-system/sw/bin/ls",
-        "/run/current-system/sw/bin/true",
-        "/run/current-system/sw/bin/false",
-        "/run/current-system/sw/bin/env",
-    ];
+    let cmds = &["no-such-command", "ls", "true", "false", "env"];
     let cpus = &[Decimal::new(1, 1), Decimal::new(3, 1)];
     let mems = &[16, 64, 128];
     let mut idx = 0;
@@ -63,9 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let spec = PodSpec {
             containers: vec![PodContainerSpec {
-                image: "no-such-image".to_owned(),
-                entrypoint: Some(cmd.to_owned()),
-                cmd: Vec::new(),
+                name: "cmd".to_owned(),
+                image: "docker.io/library/busybox".to_owned(),
+                entrypoint: None,
+                cmd: vec![cmd.to_owned()],
                 env: HashMap::from([
                     ("FOO".to_owned(), "1".to_owned()),
                     ("BAR".to_owned(), "2".to_owned()),

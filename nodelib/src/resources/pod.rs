@@ -10,6 +10,14 @@ use crate::types::ResourceError;
 pub type PodResource = GenericResource<PodSpec>;
 
 /// A pod resource specification.
+///
+/// TODO: Validations:
+///
+/// - Each container's name is unique.
+///
+/// - Each container's resource limit is >= its resource request (if given).
+///
+/// - Each port mapping uses a unique cluster port.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PodSpec {
     #[serde(default)]
@@ -20,6 +28,9 @@ pub struct PodSpec {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PodContainerSpec {
+    /// Name - must be unique inside this pod.
+    pub name: String,
+
     /// Container image to run.
     pub image: String,
 

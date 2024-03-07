@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use std::cmp;
 use std::process;
 use std::sync::Arc;
@@ -20,10 +21,10 @@ use nodelib::types::Error;
 pub static EXIT_CODE_LIMITER_FAILED: i32 = 1;
 
 /// Default CPU request, if none is specified: 1 milliCPUs.
-pub static DEFAULT_MIN_CPU: &str = "0.001";
+pub static DEFAULT_MIN_CPU: Decimal = dec!(0.001);
 
 /// Default CPU limit, if none is specified: max(request, 0.25 CPUs).
-pub static DEFAULT_MAX_CPU: &str = "2.5";
+pub static DEFAULT_MAX_CPU: Decimal = dec!(0.25);
 
 /// Default memory request, if none is specified: 128MiB.
 pub static DEFAULT_MIN_MEMORY: u64 = 128;
@@ -66,6 +67,7 @@ pub async fn initialise(
 }
 
 /// The resources that a running pod has claimed.
+#[derive(Debug)]
 pub struct CommittedPodResources {
     cpu: Decimal,
     memory: u64,
@@ -80,12 +82,8 @@ impl State {
         let requests = agg.requests.unwrap();
         let limits = agg.limits.unwrap();
 
-        let min_cpu = requests
-            .cpu
-            .unwrap_or(Decimal::from_str_exact(DEFAULT_MIN_CPU).unwrap());
-        let max_cpu = limits
-            .cpu
-            .unwrap_or(Decimal::from_str_exact(DEFAULT_MAX_CPU).unwrap());
+        let min_cpu = requests.cpu.unwrap_or(DEFAULT_MIN_CPU);
+        let max_cpu = limits.cpu.unwrap_or(DEFAULT_MAX_CPU);
         let min_memory = requests.memory.unwrap_or(DEFAULT_MIN_MEMORY);
         let max_memory = limits.memory.unwrap_or(DEFAULT_MAX_MEMORY);
 
