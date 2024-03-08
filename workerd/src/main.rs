@@ -1,9 +1,8 @@
 use clap::Parser;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 use std::process;
 
-use nodelib::types::NodeType;
+use nodelib::resources::node::*;
 
 use workerd::limits;
 use workerd::pod_claimer;
@@ -43,10 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = nodelib::initialise(
         node,
         NodeType::Worker,
-        HashMap::from([(
-            "limits".to_owned(),
-            serde_json::json!({"cpu": cpu, "memory": memory}),
-        )]),
+        NodeSpec {
+            limits: Some(NodeLimitSpec { cpu, memory }),
+        },
     )
     .await?;
 

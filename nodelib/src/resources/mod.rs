@@ -1,3 +1,4 @@
+pub mod node;
 pub mod pod;
 pub mod types;
 
@@ -9,6 +10,7 @@ use crate::etcd;
 use crate::types::Error;
 
 // convenience re-exports
+pub use crate::resources::node::NodeResource;
 pub use crate::resources::pod::PodResource;
 pub use crate::resources::types::{GenericResource, Resource};
 
@@ -21,9 +23,13 @@ pub use crate::resources::types::{GenericResource, Resource};
 /// - Contains only ASCII letters, digits, and hyphens
 /// - Starts with a letter
 /// - Does not end with a hyphen
-pub async fn put<StateT: Clone + Debug + Serialize, SpecT: Clone + Debug + Serialize>(
+pub async fn put<
+    TypeT: Clone + Debug + Serialize,
+    StateT: Clone + Debug + Serialize,
+    SpecT: Clone + Debug + Serialize,
+>(
     etcd_config: &etcd::Config,
-    resource: GenericResource<StateT, SpecT>,
+    resource: GenericResource<TypeT, StateT, SpecT>,
 ) -> Result<(), Error> {
     resource.validate()?;
 

@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             }],
         };
-        let pod = PodResource::new(pod_name.clone(), "pod".to_owned(), spec)
+        let pod = PodResource::new(pod_name.clone(), PodType::Pod, spec)
             .with_state(PodState::Created)
             .with_metadata("createdBy", name.clone());
 

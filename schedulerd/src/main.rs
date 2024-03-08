@@ -1,8 +1,7 @@
 use clap::Parser;
-use std::collections::HashMap;
 use std::process;
 
-use nodelib::types::NodeType;
+use nodelib::resources::node::*;
 
 use schedulerd::node_watcher;
 use schedulerd::pod_scheduler;
@@ -22,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let etcd_config = config.etcd.clone();
     let node_state = node_watcher::initialise(etcd_config.clone()).await?;
 
-    let state = nodelib::initialise(config, NodeType::Scheduler, HashMap::new()).await?;
+    let state = nodelib::initialise(config, NodeType::Scheduler, NodeSpec::default()).await?;
 
     pod_scheduler::initialise(etcd_config, node_state, state.name.clone()).await?;
 

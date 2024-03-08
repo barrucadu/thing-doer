@@ -2,12 +2,38 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 
 use crate::resources::types::{GenericResource, Resource, TryFromError};
 use crate::types::ResourceError;
 
 /// A resource where the spec is a pod.
-pub type PodResource = GenericResource<PodState, PodSpec>;
+pub type PodResource = GenericResource<PodType, PodState, PodSpec>;
+
+/// There's only one pod resource type.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum PodType {
+    #[serde(rename = "pod")]
+    Pod,
+}
+
+impl fmt::Display for PodType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = serde_json::from_value::<String>(serde_json::json!(self)).unwrap();
+        write!(f, "{s}")
+    }
+}
+
+impl FromStr for PodType {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value::<Self>(serde_json::json!(s))
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /// The state of a pod resource.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -46,6 +72,23 @@ impl PodState {
         }
     }
 }
+
+impl fmt::Display for PodState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = serde_json::from_value::<String>(serde_json::json!(self)).unwrap();
+        write!(f, "{s}")
+    }
+}
+
+impl FromStr for PodState {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value::<Self>(serde_json::json!(s))
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /// A pod resource specification.
 ///
@@ -211,11 +254,9 @@ impl TryFrom<Resource> for PodResource {
             spec,
         } = resource;
 
-        if rtype != *"pod" {
-            return Err(ResourceError::BadType.into());
-        }
+        let pod_type = PodType::from_str(&rtype)?;
         let pod_state = if let Some(s) = state {
-            serde_json::from_value::<PodState>(serde_json::json!(s))?
+            PodState::from_str(&s)?
         } else {
             return Err(ResourceError::BadState.into());
         };
@@ -225,7 +266,7 @@ impl TryFrom<Resource> for PodResource {
 
         Ok(GenericResource {
             name,
-            rtype,
+            rtype: pod_type,
             state: Some(pod_state),
             metadata,
             spec: pod_spec,
@@ -237,7 +278,7 @@ impl TryFrom<Value> for PodResource {
     type Error = TryFromError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        PodResource::try_from(Resource::try_from(value)?)
+        Self::try_from(Resource::try_from(value)?)
     }
 }
 
@@ -245,6 +286,6 @@ impl TryFrom<Vec<u8>> for PodResource {
     type Error = TryFromError;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        PodResource::try_from(Resource::try_from(bytes)?)
+        Self::try_from(Resource::try_from(bytes)?)
     }
 }

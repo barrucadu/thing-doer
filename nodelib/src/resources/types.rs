@@ -6,19 +6,19 @@ use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
 use crate::types::ResourceError;
-use crate::util::{is_valid_resource_name, is_valid_resource_type};
 
-/// A resource where the state is a string and the spec is a JSON object.
-pub type Resource = GenericResource<String, HashMap<String, Value>>;
+/// A resource where the type and state are strings and the spec is a JSON
+/// object.
+pub type Resource = GenericResource<String, String, HashMap<String, Value>>;
 
 /// A resource, generic over the spec type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GenericResource<StateT, SpecT> {
+pub struct GenericResource<TypeT, StateT, SpecT> {
     /// Name - must be a valid DNS label and globally unique for the type.
     pub name: String,
     /// Type - must consist of just alphanums and dots.
     #[serde(rename = "type")]
-    pub rtype: String,
+    pub rtype: TypeT,
     /// State - optional, type-specific.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<StateT>,
@@ -29,9 +29,9 @@ pub struct GenericResource<StateT, SpecT> {
     pub spec: SpecT,
 }
 
-impl<SpecT, StateT> GenericResource<StateT, SpecT> {
+impl<TypeT: Serialize, SpecT: Serialize, StateT: Serialize> GenericResource<TypeT, StateT, SpecT> {
     /// Construct a resource out of just a name and a type.
-    pub fn new(name: String, rtype: String, spec: SpecT) -> Self {
+    pub fn new(name: String, rtype: TypeT, spec: SpecT) -> Self {
         Self {
             name,
             rtype,
@@ -53,12 +53,17 @@ impl<SpecT, StateT> GenericResource<StateT, SpecT> {
         self
     }
 
+    /// Get the serialised type name.
+    pub fn type_name(&self) -> String {
+        serde_json::from_value::<String>(serde_json::json!(self.rtype)).unwrap()
+    }
+
     /// Check if a resource is valid.
     pub fn validate(&self) -> Result<(), ResourceError> {
         if !is_valid_resource_name(&self.name) {
             return Err(ResourceError::BadName);
         }
-        if !is_valid_resource_type(&self.rtype) {
+        if !is_valid_resource_type(&self.type_name()) {
             return Err(ResourceError::BadType);
         }
 
@@ -69,13 +74,11 @@ impl<SpecT, StateT> GenericResource<StateT, SpecT> {
     pub fn key(&self, etcd_config: &etcd::Config) -> String {
         format!(
             "{prefix}{res_name}",
-            prefix = prefix::resource(etcd_config, &self.rtype),
+            prefix = prefix::resource(etcd_config, &self.type_name()),
             res_name = self.name,
         )
     }
-}
 
-impl<SpecT: Serialize, StateT: Serialize> GenericResource<StateT, SpecT> {
     /// Turn a resource into a JSON string.
     pub fn to_json_string(self) -> String {
         serde_json::to_string(&self).unwrap().to_string()
@@ -129,4 +132,28 @@ impl TryFrom<Vec<u8>> for Resource {
 
         Ok(resource)
     }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// Check that a name is all lowercase and is a valid DNS label.
+fn is_valid_resource_name(name: &str) -> bool {
+    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '-';
+
+    !name.is_empty()
+        && name.len() <= 63
+        && name.chars().all(valid_character)
+        && name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && !name.ends_with(|c: char| c == '-')
+}
+
+/// Check that a type name is nonempty and of the form
+/// `/[a-z0-9][a-z0-9\.]*[a-z0-9]`.
+fn is_valid_resource_type(rtype: &str) -> bool {
+    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '.';
+
+    !rtype.is_empty()
+        && rtype.chars().all(valid_character)
+        && !rtype.starts_with(|c: char| c == '.')
+        && !rtype.ends_with(|c: char| c == '.')
 }

@@ -1,6 +1,5 @@
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -8,7 +7,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::resources::Resource;
+use nodelib::resources::node::*;
 use nodelib::types::Error;
 
 /// A handle to the shared state.
@@ -33,7 +32,7 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
         prefix::node_heartbeat_healthy(&etcd_config),
         prefix::node_available_cpu(&etcd_config),
         prefix::node_available_memory(&etcd_config),
-        prefix::resource(&etcd_config, "node.worker"),
+        prefix::resource(&etcd_config, &NodeType::Worker.to_string()),
     ];
 
     for prefix in prefixes {
@@ -55,7 +54,7 @@ impl State {
 #[derive(Debug)]
 struct InnerState {
     pub etcd_config: etcd::Config,
-    pub worker_nodes: HashMap<String, SocketAddr>,
+    pub worker_nodes: HashMap<String, NodeResource>,
     pub node_is_healthy: HashMap<String, bool>,
     pub node_available_cpu: HashMap<String, Decimal>,
     pub node_available_memory: HashMap<String, u64>,
@@ -69,15 +68,15 @@ impl InnerState {
     {
         self.worker_nodes
             .iter()
-            .map(|(name, address)| (name.to_owned(), self.get_node_state(name, *address)))
+            .map(|(name, res)| (name.to_owned(), self.get_node_state(name, res.clone())))
             .filter(|(_, v)| predicate(v))
             .collect()
     }
 
     /// Get the state of a single node.
-    fn get_node_state(&self, name: &str, address: SocketAddr) -> NodeState {
+    fn get_node_state(&self, name: &str, resource: NodeResource) -> NodeState {
         NodeState {
-            address,
+            resource,
             is_healthy: self.node_is_healthy.get(name).copied(),
             available_cpu: self.node_available_cpu.get(name).copied(),
             available_memory: self.node_available_memory.get(name).copied(),
@@ -90,7 +89,7 @@ impl watcher::Watcher for InnerState {
         let healthcheck_prefix = prefix::node_heartbeat_healthy(&self.etcd_config);
         let available_cpu_prefix = prefix::node_available_cpu(&self.etcd_config);
         let available_memory_prefix = prefix::node_available_memory(&self.etcd_config);
-        let resource_prefix = prefix::resource(&self.etcd_config, "node.worker");
+        let resource_prefix = prefix::resource(&self.etcd_config, &NodeType::Worker.to_string());
 
         let is_create = event.r#type() == EventType::Put;
         let kv = event.kv.unwrap();
@@ -122,11 +121,14 @@ impl watcher::Watcher for InnerState {
                 self.node_available_memory.remove(name);
             }
         } else if let Some((_, name)) = key.split_once(&resource_prefix) {
-            if let Some(address) = address_from_node_json(kv.value) {
-                tracing::info!(name, ?address, "found worker node");
-                self.worker_nodes.insert(name.to_owned(), address);
-            } else {
-                tracing::warn!(name, "could not parse worker node definition");
+            match NodeResource::try_from(kv.value) {
+                Ok(resource) => {
+                    tracing::info!(name, "found new worker node");
+                    self.worker_nodes.insert(name.to_owned(), resource);
+                }
+                Err(error) => {
+                    tracing::warn!(name, ?error, "could not parse worker node definition");
+                }
             }
         } else {
             tracing::warn!(?key, "unexpected watch key");
@@ -137,19 +139,10 @@ impl watcher::Watcher for InnerState {
 /// The state of a single node.
 #[derive(Debug)]
 pub struct NodeState {
-    pub address: SocketAddr,
+    pub resource: NodeResource,
     pub is_healthy: Option<bool>,
     pub available_cpu: Option<Decimal>,
     pub available_memory: Option<u64>,
-}
-
-/// Parse a value as node JSON and extract the address field.
-fn address_from_node_json(bytes: Vec<u8>) -> Option<SocketAddr> {
-    let resource = Resource::try_from(bytes).ok()?;
-    let address_value = resource.spec.get("address")?;
-    let address_str = address_value.as_str()?;
-
-    address_str.parse().ok()
 }
 
 /// Parse a value as a `Decimal`

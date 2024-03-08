@@ -81,14 +81,17 @@ impl watcher::Watcher for WatchState {
 
         if let Some((_, name)) = key.split_once(&prefix) {
             if is_create {
-                if let Ok(resource) = PodResource::try_from(kv.value) {
-                    tracing::info!(name, "found new pod");
-                    self.unscheduled_pods.insert(name.to_owned(), (0, resource));
-                    if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
-                        tracing::warn!(name, ?error, "could not trigger scheduler");
+                match PodResource::try_from(kv.value) {
+                    Ok(resource) => {
+                        tracing::info!(name, "found new pod");
+                        self.unscheduled_pods.insert(name.to_owned(), (0, resource));
+                        if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
+                            tracing::warn!(name, ?error, "could not trigger scheduler");
+                        }
                     }
-                } else {
-                    tracing::warn!(?key, "could not parse pod definition");
+                    Err(error) => {
+                        tracing::warn!(?key, ?error, "could not parse pod definition");
+                    }
                 }
             } else if self.unscheduled_pods.remove(name).is_some() {
                 tracing::info!(name, "deleted unscheduled pod");

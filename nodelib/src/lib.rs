@@ -4,15 +4,13 @@ pub mod resources;
 pub mod types;
 pub mod util;
 
-use serde_json::Value;
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 
 use crate::etcd::leaser;
-use crate::types::{Error, NodeType};
+use crate::resources::node::*;
+use crate::types::Error;
 
 /// Exit code in case the initialisation process failed.
 pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;
@@ -21,21 +19,12 @@ pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;
 #[group(skip)]
 pub struct Config {
     /// Name of this instance, must be unique across the cluster.  If
-    /// unspecified, a random name is generated from the advertise address.
+    /// unspecified, a random name is generated.
     #[clap(
         long,
         value_parser = |s: &str| Ok::<Option<String>, String>(Some(s.to_lowercase())),
     )]
     pub name: Option<String>,
-
-    /// Address to listen for new connections on.
-    #[clap(long, value_parser, env = "LISTEN_ADDRESS")]
-    pub listen_address: SocketAddr,
-
-    /// Address to advertise to the rest of the cluster.  If unspecified, the
-    /// listen address is used.
-    #[clap(long, value_parser, env = "ADVERTISE_ADDRESS")]
-    pub advertise_address: Option<SocketAddr>,
 
     #[command(flatten)]
     pub etcd: etcd::Config,
@@ -58,10 +47,11 @@ pub struct State {
 pub async fn initialise(
     config: Config,
     node_type: NodeType,
-    mut spec: HashMap<String, Value>,
+    node_spec: NodeSpec,
 ) -> Result<State, Error> {
-    let address = config.advertise_address.unwrap_or(config.listen_address);
-    let name = config.name.unwrap_or(util::sockaddr_to_name(address));
+    let name = config
+        .name
+        .unwrap_or(format!("n{suffix}", suffix = util::random_string(8),));
 
     if heartbeat::is_alive(&config.etcd, &name).await? {
         tracing::error!(
@@ -71,9 +61,8 @@ pub async fn initialise(
         process::exit(EXIT_CODE_INITIALISE_FAILED);
     }
 
-    spec.insert("address".to_owned(), serde_json::json!(address));
-    let resource = resources::Resource::new(name.clone(), format!("node.{node_type}"), spec);
-
+    let resource = resources::NodeResource::new(name.clone(), node_type, node_spec)
+        .with_state(NodeState::Healthy);
     resources::put(&config.etcd, resource).await?;
 
     let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;

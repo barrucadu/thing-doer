@@ -1,25 +1,5 @@
 use std::fmt;
 
-/// The type of a node.
-#[derive(Debug, Copy, Clone)]
-pub enum NodeType {
-    Reaper,
-    Scheduler,
-    Worker,
-}
-
-impl fmt::Display for NodeType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Reaper => write!(f, "reaper"),
-            Self::Scheduler => write!(f, "scheduler"),
-            Self::Worker => write!(f, "worker"),
-        }
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
 /// Generic error type
 #[derive(Debug)]
 pub enum Error {
