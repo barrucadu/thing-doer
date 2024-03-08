@@ -9,13 +9,13 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tonic::Request;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::leaser::LeaseId;
 use nodelib::etcd::pb::etcdserverpb::request_op;
 use nodelib::etcd::pb::etcdserverpb::{PutRequest, RequestOp, TxnRequest};
 use nodelib::etcd::prefix;
 use nodelib::resources::PodResource;
-use nodelib::types::Error;
 
 /// Exit code in case the limit channel closes.
 pub static EXIT_CODE_LIMITER_FAILED: i32 = 1;

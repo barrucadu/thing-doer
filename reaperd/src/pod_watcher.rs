@@ -6,11 +6,11 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::types::Error;
 
 use crate::reaper::reap_pod;
 

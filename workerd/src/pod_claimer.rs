@@ -7,6 +7,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tonic::Request;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::leaser::LeaseId;
 use nodelib::etcd::pb::etcdserverpb::request_op;
@@ -15,7 +16,6 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::pod::*;
-use nodelib::types::Error;
 
 /// Exit code in case the claimer channel closes.
 pub static EXIT_CODE_CLAIMER_FAILED: i32 = 1;

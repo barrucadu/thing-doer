@@ -2,6 +2,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::transport::Channel;
 use tonic::Request;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::compare;
 use nodelib::etcd::pb::etcdserverpb::kv_client;
@@ -12,7 +13,6 @@ use nodelib::etcd::pb::etcdserverpb::{
 };
 use nodelib::etcd::prefix;
 use nodelib::resources::pod::*;
-use nodelib::types::Error;
 
 /// Mark all inboxed pods on a node as dead
 pub async fn reap_node_inbox(

@@ -6,12 +6,12 @@ use tokio::time::timeout;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
+use crate::error::*;
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::{
     LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, LeaseRevokeRequest,
     PutRequest,
 };
-use crate::types::{Error, StreamingError};
 
 /// The timeout waiting for etcd to respond to a ping.
 pub static PONG_TIMEOUT: u64 = 5;

@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+use crate::error::ResourceError;
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
-use crate::types::ResourceError;
 
 /// A resource where the type and state are strings and the spec is a JSON
 /// object.

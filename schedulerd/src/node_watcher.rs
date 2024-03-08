@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::node::*;
-use nodelib::types::Error;
 
 /// A handle to the shared state.
 #[derive(Debug, Clone)]

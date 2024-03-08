@@ -4,11 +4,11 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tonic::Request;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use nodelib::etcd::prefix;
 use nodelib::resources::pod::*;
-use nodelib::types::Error;
 
 use crate::limits;
 use crate::podman;

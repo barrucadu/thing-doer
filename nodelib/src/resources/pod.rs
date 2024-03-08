@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
+use crate::error::ResourceError;
 use crate::resources::types::{GenericResource, Resource, TryFromError};
-use crate::types::ResourceError;
 
 /// A resource where the spec is a pod.
 pub type PodResource = GenericResource<PodType, PodState, PodSpec>;

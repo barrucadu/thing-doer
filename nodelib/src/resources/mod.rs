@@ -6,8 +6,8 @@ use serde::Serialize;
 use std::fmt::Debug;
 use tonic::Request;
 
+use crate::error::Error;
 use crate::etcd;
-use crate::types::Error;
 
 // convenience re-exports
 pub use crate::resources::node::NodeResource;

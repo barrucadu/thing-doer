@@ -8,6 +8,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tonic::Request;
 
+use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::compare;
 use nodelib::etcd::pb::etcdserverpb::request_op;
@@ -18,7 +19,6 @@ use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::pod::*;
-use nodelib::types::Error;
 
 use crate::node_watcher;
 

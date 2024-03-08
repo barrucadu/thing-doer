@@ -1,16 +1,16 @@
+pub mod error;
 pub mod etcd;
 pub mod heartbeat;
 pub mod resources;
-pub mod types;
 pub mod util;
 
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 
+use crate::error::*;
 use crate::etcd::leaser;
 use crate::resources::node::*;
-use crate::types::Error;
 
 /// Exit code in case the initialisation process failed.
 pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;

@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
+use crate::error::*;
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
 use crate::etcd::pb::etcdserverpb::watch_request::RequestUnion;
@@ -15,7 +16,6 @@ use crate::etcd::pb::etcdserverpb::{
 };
 use crate::etcd::pb::mvccpb::{event::EventType, Event};
 use crate::etcd::prefix;
-use crate::types::{Error, StreamingError};
 
 /// The maximum number of retries in case of failure to watch.
 pub static MAXIMUM_RETRIES: u32 = 10;
