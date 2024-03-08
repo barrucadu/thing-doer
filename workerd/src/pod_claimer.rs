@@ -14,8 +14,8 @@ use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest, RequestOp,
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-use nodelib::resources::PodResource;
-use nodelib::types::{Error, PodState};
+use nodelib::resources::pod::*;
+use nodelib::types::Error;
 
 /// Exit code in case the claimer channel closes.
 pub static EXIT_CODE_CLAIMER_FAILED: i32 = 1;
@@ -182,7 +182,7 @@ async fn claim_pod(
     lease_id: LeaseId,
     pod: PodResource,
 ) -> Result<PodResource, Error> {
-    let pod = pod.with_state(PodState::Accepted.to_resource_state());
+    let pod = pod.with_state(PodState::Accepted);
 
     let mut kv_client = state.etcd_config.kv_client().await?;
     kv_client

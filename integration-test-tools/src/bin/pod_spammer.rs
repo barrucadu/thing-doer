@@ -9,8 +9,6 @@ use nodelib::etcd::pb::etcdserverpb::PutRequest;
 use nodelib::etcd::prefix;
 use nodelib::resources;
 use nodelib::resources::pod::*;
-use nodelib::resources::Resource;
-use nodelib::types::PodState;
 use nodelib::util;
 
 /// thing-doer integration test tools: pod spammer.
@@ -75,10 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             }],
         };
-        let specv = serde_json::to_value(spec).unwrap();
-        let specm = serde_json::from_value::<HashMap<_, _>>(specv).unwrap();
-        let pod = Resource::new(pod_name.clone(), "pod".to_owned(), specm)
-            .with_state(PodState::Created.to_resource_state())
+        let pod = PodResource::new(pod_name.clone(), "pod".to_owned(), spec)
+            .with_state(PodState::Created)
             .with_metadata("createdBy", name.clone());
 
         let mut kv_client = config.etcd.kv_client().await?;

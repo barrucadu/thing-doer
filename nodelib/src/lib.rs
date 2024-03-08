@@ -62,7 +62,7 @@ pub async fn initialise(
     }
 
     spec.insert("address".to_owned(), serde_json::json!(address));
-    let resource = resources::GenericResource::new(name.clone(), format!("node.{node_type}"), spec);
+    let resource = resources::Resource::new(name.clone(), format!("node.{node_type}"), spec);
 
     resources::put(&config.etcd, resource).await?;
 

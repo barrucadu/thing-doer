@@ -1,6 +1,8 @@
 pub mod pod;
 pub mod types;
 
+use serde::Serialize;
+use std::fmt::Debug;
 use tonic::Request;
 
 use crate::etcd;
@@ -19,7 +21,10 @@ pub use crate::resources::types::{GenericResource, Resource};
 /// - Contains only ASCII letters, digits, and hyphens
 /// - Starts with a letter
 /// - Does not end with a hyphen
-pub async fn put(etcd_config: &etcd::Config, resource: Resource) -> Result<(), Error> {
+pub async fn put<StateT: Clone + Debug + Serialize, SpecT: Clone + Debug + Serialize>(
+    etcd_config: &etcd::Config,
+    resource: GenericResource<StateT, SpecT>,
+) -> Result<(), Error> {
     resource.validate()?;
 
     let mut kv_client = etcd_config.kv_client().await?;

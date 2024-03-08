@@ -11,8 +11,8 @@ use nodelib::etcd::pb::etcdserverpb::{
     Compare, DeleteRangeRequest, PutRequest, RangeRequest, RequestOp, TxnRequest,
 };
 use nodelib::etcd::prefix;
-use nodelib::resources::Resource;
-use nodelib::types::{Error, PodState};
+use nodelib::resources::pod::*;
+use nodelib::types::Error;
 
 /// Mark all inboxed pods on a node as dead
 pub async fn reap_node_inbox(
@@ -78,21 +78,15 @@ pub async fn reap_pod(
 
     let version = res.kvs[0].version;
     let bytes = res.kvs[0].value.clone();
-    match Resource::try_from(bytes) {
+    match PodResource::try_from(bytes) {
         Ok(pod) => {
-            if pod.metadata.contains_key("reapedBy")
-                || pod
-                    .state
-                    .as_deref()
-                    .and_then(PodState::from_resource_state)
-                    .map_or(false, |s| s.is_terminal())
-            {
+            if pod.metadata.contains_key("reapedBy") || pod.state.unwrap().is_terminal() {
                 Ok(false)
             } else {
                 txn_check_and_set(
                     kv_client,
                     version,
-                    pod.with_state(PodState::Dead.to_resource_state())
+                    pod.with_state(PodState::Dead)
                         .with_metadata("reapedBy", my_name.to_owned())
                         .to_put_request(etcd_config),
                 )

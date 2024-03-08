@@ -696,7 +696,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "serde_plain",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -1164,15 +1163,6 @@ checksum = "c5f09b1bd632ef549eaa9f60a1f8de742bdbc698e6cee2095fc84dde5f549ae0"
 dependencies = [
  "itoa",
  "ryu",
- "serde",
-]
-
-[[package]]
-name = "serde_plain"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ce1fc6db65a611022b23a0dec6975d63fb80a302cb3388835ff02c097258d50"
-dependencies = [
  "serde",
 ]
 

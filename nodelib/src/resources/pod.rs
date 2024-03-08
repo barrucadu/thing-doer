@@ -7,7 +7,45 @@ use crate::resources::types::{GenericResource, Resource, TryFromError};
 use crate::types::ResourceError;
 
 /// A resource where the spec is a pod.
-pub type PodResource = GenericResource<PodSpec>;
+pub type PodResource = GenericResource<PodState, PodSpec>;
+
+/// The state of a pod resource.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PodState {
+    /// Initial state
+    Created,
+    /// Assigned to a worker
+    Scheduled,
+    /// Could not be assigned to a worker within the retry limit
+    Abandoned,
+    /// Picked up by a worker but not yet started
+    Accepted,
+    /// Running, not yet terminated
+    Running,
+    /// Exited with a successful exit code
+    ExitSuccess,
+    /// Exited with an unsuccessful exit code
+    ExitFailure,
+    /// Failed to start
+    Errored,
+    /// Presumed dead, due to worker failure
+    Dead,
+}
+
+impl PodState {
+    /// True if this is a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Abandoned
+            | Self::ExitSuccess
+            | Self::ExitFailure
+            | Self::Errored
+            | Self::Dead => true,
+            Self::Created | Self::Scheduled | Self::Accepted | Self::Running => false,
+        }
+    }
+}
 
 /// A pod resource specification.
 ///
@@ -176,6 +214,11 @@ impl TryFrom<Resource> for PodResource {
         if rtype != *"pod" {
             return Err(ResourceError::BadType.into());
         }
+        let pod_state = if let Some(s) = state {
+            serde_json::from_value::<PodState>(serde_json::json!(s))?
+        } else {
+            return Err(ResourceError::BadState.into());
+        };
 
         let value = serde_json::to_value(spec).unwrap();
         let pod_spec = serde_json::from_value::<PodSpec>(value)?;
@@ -183,7 +226,7 @@ impl TryFrom<Resource> for PodResource {
         Ok(GenericResource {
             name,
             rtype,
-            state,
+            state: Some(pod_state),
             metadata,
             spec: pod_spec,
         })

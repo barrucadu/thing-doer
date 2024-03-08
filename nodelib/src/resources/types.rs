@@ -8,12 +8,12 @@ use crate::etcd::prefix;
 use crate::types::ResourceError;
 use crate::util::{is_valid_resource_name, is_valid_resource_type};
 
-/// A resource where the spec is a JSON object.
-pub type Resource = GenericResource<HashMap<String, Value>>;
+/// A resource where the state is a string and the spec is a JSON object.
+pub type Resource = GenericResource<String, HashMap<String, Value>>;
 
 /// A resource, generic over the spec type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GenericResource<T> {
+pub struct GenericResource<StateT, SpecT> {
     /// Name - must be a valid DNS label and globally unique for the type.
     pub name: String,
     /// Type - must consist of just alphanums and dots.
@@ -21,17 +21,17 @@ pub struct GenericResource<T> {
     pub rtype: String,
     /// State - optional, type-specific.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
+    pub state: Option<StateT>,
     /// Metadata - optional key / value data.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
     /// Spec - type-specific resource definition.
-    pub spec: T,
+    pub spec: SpecT,
 }
 
-impl<T: Serialize> GenericResource<T> {
+impl<SpecT, StateT> GenericResource<StateT, SpecT> {
     /// Construct a resource out of just a name and a type.
-    pub fn new(name: String, rtype: String, spec: T) -> Self {
+    pub fn new(name: String, rtype: String, spec: SpecT) -> Self {
         Self {
             name,
             rtype,
@@ -42,7 +42,7 @@ impl<T: Serialize> GenericResource<T> {
     }
 
     /// Set the state, overwriting any existing value.
-    pub fn with_state(mut self, state: String) -> Self {
+    pub fn with_state(mut self, state: StateT) -> Self {
         self.state = Some(state);
         self
     }
@@ -73,7 +73,9 @@ impl<T: Serialize> GenericResource<T> {
             res_name = self.name,
         )
     }
+}
 
+impl<SpecT: Serialize, StateT: Serialize> GenericResource<StateT, SpecT> {
     /// Turn a resource into a JSON string.
     pub fn to_json_string(self) -> String {
         serde_json::to_string(&self).unwrap().to_string()

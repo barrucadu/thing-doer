@@ -7,8 +7,8 @@ use tonic::Request;
 use nodelib::etcd;
 use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use nodelib::etcd::prefix;
-use nodelib::resources::PodResource;
-use nodelib::types::{Error, PodState};
+use nodelib::resources::pod::*;
+use nodelib::types::Error;
 
 use crate::limits;
 use crate::podman;
@@ -77,7 +77,7 @@ async fn work_pod(
 
     let put_req = pod
         .clone()
-        .with_state(PodState::Running.to_resource_state())
+        .with_state(PodState::Running)
         .to_put_request(&etcd_config);
     while let Err(error) = try_put_request(&etcd_config, &put_req).await {
         tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
@@ -97,9 +97,7 @@ async fn work_pod(
         }
     };
 
-    let put_req = pod
-        .with_state(state.to_resource_state())
-        .to_put_request(&etcd_config);
+    let put_req = pod.with_state(state).to_put_request(&etcd_config);
     while let Err(error) = try_put_request(&etcd_config, &put_req).await {
         tracing::warn!(pod_name, ?error, "could not update pod state, retrying...");
         tokio::time::sleep(Duration::from_secs(5)).await;
