@@ -1,14 +1,15 @@
 use std::process;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::{
-    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, PutRequest,
+    LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, LeaseRevokeRequest,
+    PutRequest,
 };
 use crate::types::{Error, StreamingError};
 
@@ -39,47 +40,69 @@ pub struct LeaseId(pub i64);
 ///
 /// If a lease cannot be established, or gets dropped and cannot be
 /// reestablished, this terminates the process.
-pub async fn task(config: Config, mut lease: Lease) {
+pub async fn task(
+    config: Config,
+    mut expire_rx: oneshot::Receiver<oneshot::Sender<()>>,
+    mut lease: Lease,
+) {
     let mut retries: u32 = 0;
-    while let Err((successes, error)) = task_loop(&config, &lease).await {
-        if successes > 0 {
-            retries = 0;
-        } else {
-            retries += 1;
-        }
-
-        tracing::warn!(?error, ?retries, "error in etcd lease keepalive request");
-
-        while retries < MAXIMUM_RETRIES {
-            tokio::time::sleep(Duration::from_secs(2_u64.pow(retries))).await;
-            match establish_lease(&config, lease.requested_ttl, lease.key.clone()).await {
-                Ok(new_lease) => {
-                    tracing::info!("etcd connection reestablished");
-                    lease = new_lease;
-                    break;
+    loop {
+        match task_loop(&config, &mut expire_rx, &lease).await {
+            Ok(notify) => {
+                tracing::info!(key = lease.key, "revoking lease");
+                let revoke_req = LeaseRevokeRequest { id: lease.id.0 };
+                let mut revoke_retries: u32 = 0;
+                while let Err(error) = try_revoke_request(&config, &revoke_req).await {
+                    revoke_retries += 1;
+                    if revoke_retries < 3 {
+                        tracing::warn!(?error, "could not revoke lease, retrying...");
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    } else {
+                        tracing::warn!(?error, "could not revoke lease, giving up...");
+                        break;
+                    }
                 }
-                Err(error) => {
-                    tracing::warn!(
+                let _ = notify.send(());
+                return;
+            }
+            Err((successes, error)) => {
+                if successes > 0 {
+                    retries = 0;
+                } else {
+                    retries += 1;
+                }
+
+                tracing::warn!(?error, ?retries, "error in etcd lease keepalive request");
+
+                while retries < MAXIMUM_RETRIES {
+                    tokio::time::sleep(Duration::from_secs(2_u64.pow(retries))).await;
+                    match establish_lease(&config, lease.requested_ttl, lease.key.clone()).await {
+                        Ok(new_lease) => {
+                            tracing::info!("etcd connection reestablished");
+                            lease = new_lease;
+                            break;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                ?error,
+                                ?retries,
+                                "could not reestablish connection to etcd, retrying..."
+                            );
+                            retries += 1;
+                        }
+                    }
+                }
+                if retries == MAXIMUM_RETRIES {
+                    tracing::error!(
                         ?error,
                         ?retries,
-                        "could not reestablish connection to etcd, retrying..."
+                        "could not reestablish connection to etcd, terminating..."
                     );
-                    retries += 1;
+                    process::exit(EXIT_CODE_LEASE_FAILED);
                 }
             }
         }
-        if retries == MAXIMUM_RETRIES {
-            tracing::error!(
-                ?error,
-                ?retries,
-                "could not reestablish connection to etcd, terminating..."
-            );
-            process::exit(EXIT_CODE_LEASE_FAILED);
-        }
     }
-
-    // The above is an infinite loop.
-    unreachable!();
 }
 
 /// Create a lease and associate a key with it.  The value of the key is
@@ -122,7 +145,11 @@ pub async fn establish_lease(config: &Config, ttl: i64, key: String) -> Result<L
 ///
 /// If this returns an error, `task` attempts to re-establish the connection to
 /// etcd and calls `task_loop` again.
-async fn task_loop(config: &Config, lease: &Lease) -> Result<(), (usize, Error)> {
+async fn task_loop<T>(
+    config: &Config,
+    mut expire_rx: &mut oneshot::Receiver<T>,
+    lease: &Lease,
+) -> Result<T, (usize, Error)> {
     let (tx, mut response_stream) = setup_heartbeat(config, lease).await.map_err(|e| (0, e))?;
 
     let mut successes = 0;
@@ -133,15 +160,14 @@ async fn task_loop(config: &Config, lease: &Lease) -> Result<(), (usize, Error)>
         successes += 1;
 
         let wait = Duration::from_secs((response.ttl / 3) as u64);
-        tracing::info!(
-            lease_key = lease.key,
-            lease_id = lease.id.0,
-            ?wait,
-            "waiting"
-        );
-        tokio::time::sleep(wait).await;
-
-        send_ping(&tx, lease).await.map_err(|e| (successes, e))?;
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {
+                send_ping(&tx, lease).await.map_err(|e| (successes, e))?;
+            }
+            msg = &mut expire_rx => {
+                return Ok(msg.unwrap());
+            }
+        }
     }
 }
 
@@ -151,7 +177,7 @@ async fn setup_heartbeat(
     lease: &Lease,
 ) -> Result<
     (
-        Sender<LeaseKeepAliveRequest>,
+        mpsc::Sender<LeaseKeepAliveRequest>,
         Streaming<LeaseKeepAliveResponse>,
     ),
     Error,
@@ -170,7 +196,7 @@ async fn setup_heartbeat(
 }
 
 /// Send a ping
-async fn send_ping(tx: &Sender<LeaseKeepAliveRequest>, lease: &Lease) -> Result<(), Error> {
+async fn send_ping(tx: &mpsc::Sender<LeaseKeepAliveRequest>, lease: &Lease) -> Result<(), Error> {
     tracing::info!(lease_key = lease.key, lease_id = lease.id.0, "ping");
     tx.send(LeaseKeepAliveRequest { id: lease.id.0 })
         .await
@@ -187,4 +213,12 @@ async fn wait_for_pong(
         Ok(None) => Err(Error::Streaming(StreamingError::Ended)),
         Err(_) => Err(Error::Streaming(StreamingError::TimedOut)),
     }
+}
+
+/// Attempt a revoke request - `task` retries failures.
+async fn try_revoke_request(etcd_config: &Config, req: &LeaseRevokeRequest) -> Result<(), Error> {
+    let mut lease_client = etcd_config.lease_client().await?;
+    lease_client.lease_revoke(Request::new(req.clone())).await?;
+
+    Ok(())
 }

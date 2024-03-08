@@ -22,10 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let etcd_config = config.etcd.clone();
     let node_state = node_watcher::initialise(etcd_config.clone()).await?;
 
-    let (name, _) = nodelib::initialise(config, NodeType::Scheduler, HashMap::new()).await?;
+    let state = nodelib::initialise(config, NodeType::Scheduler, HashMap::new()).await?;
 
-    pod_scheduler::initialise(etcd_config, node_state, name).await?;
+    pod_scheduler::initialise(etcd_config, node_state, state.name.clone()).await?;
 
-    nodelib::wait_for_sigterm().await;
-    process::exit(0);
+    let ch = nodelib::wait_for_sigterm(state).await;
+    nodelib::signal_channel(ch).await;
+    process::exit(0)
 }

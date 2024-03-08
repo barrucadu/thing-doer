@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } = Args::parse();
     let etcd_config = node.etcd.clone();
 
-    let (name, lease_id) = nodelib::initialise(
+    let state = nodelib::initialise(
         node,
         NodeType::Worker,
         HashMap::from([(
@@ -50,12 +50,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let limit_tx =
-        limits::initialise(etcd_config.clone(), name.clone(), lease_id, cpu, memory).await?;
+    let limit_tx = limits::initialise(
+        etcd_config.clone(),
+        state.name.clone(),
+        state.alive_lease_id,
+        cpu,
+        memory,
+    )
+    .await?;
     let work_pod_tx =
-        pod_worker::initialise(etcd_config.clone(), podman, name.clone(), limit_tx).await?;
-    pod_claimer::initialise(etcd_config, name, lease_id, work_pod_tx).await?;
+        pod_worker::initialise(etcd_config.clone(), podman, state.name.clone(), limit_tx).await?;
+    pod_claimer::initialise(
+        etcd_config,
+        state.name.clone(),
+        state.alive_lease_id,
+        work_pod_tx,
+    )
+    .await?;
 
-    nodelib::wait_for_sigterm().await;
-    process::exit(0);
+    let ch = nodelib::wait_for_sigterm(state).await;
+    // TODO: terminate pods
+    nodelib::signal_channel(ch).await;
+    process::exit(0)
 }
