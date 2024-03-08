@@ -130,16 +130,17 @@ async fn run_pod_process(
     pod: &PodResource,
 ) -> std::io::Result<Option<bool>> {
     match podman::create_pod(&podman_config, my_name, pod).await? {
-        Some(podman_pod) => {
+        Some(pod_state) => {
+            tracing::info!(pod_name=pod_state.name, pod_ip=?pod_state.address, "created pod");
             for container in &pod.spec.containers {
-                if !podman::start_container(&podman_config, &podman_pod, container).await? {
-                    podman::terminate_pod(&podman_config, &podman_pod).await?;
+                if !podman::start_container(&podman_config, &pod_state, container).await? {
+                    podman::terminate_pod(&podman_config, &pod_state).await?;
                     return Ok(None);
                 }
             }
 
-            let exit_success = podman::wait_for_containers(&podman_config, &podman_pod).await?;
-            podman::terminate_pod(&podman_config, &podman_pod).await?;
+            let exit_success = podman::wait_for_containers(&podman_config, &pod_state).await?;
+            podman::terminate_pod(&podman_config, &pod_state).await?;
             Ok(Some(exit_success))
         }
         None => Ok(None),

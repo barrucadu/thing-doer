@@ -1,3 +1,4 @@
+use std::net::Ipv4Addr;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
@@ -25,13 +26,21 @@ pub struct Config {
     pub bridge_network: String,
 }
 
+/// State of a created pod.
+#[derive(Debug)]
+pub struct PodState {
+    pub name: String,
+    pub infra_container_id: String,
+    pub address: Ipv4Addr,
+}
+
 /// Create the pod that will hold the containers.  All containers in the same
 /// pod can communicate via localhost, and will have the same external IP.
 pub async fn create_pod(
     config: &Config,
     my_name: &str,
     pod: &PodResource,
-) -> std::io::Result<Option<String>> {
+) -> std::io::Result<Option<PodState>> {
     let podman_pod_name = format!(
         "{prefix}-{name}",
         prefix = config
@@ -66,7 +75,15 @@ pub async fn create_pod(
 
     let exit_status = cmd.spawn()?.wait().await?;
     if exit_status.success() {
-        Ok(Some(podman_pod_name))
+        let infra_container_id = get_pod_infra_container_id(config, &podman_pod_name).await?;
+        start_container_by_id(config, &infra_container_id).await?;
+
+        let address = get_container_ip_by_id(config, &infra_container_id).await?;
+        Ok(Some(PodState {
+            name: podman_pod_name,
+            infra_container_id,
+            address,
+        }))
     } else {
         Ok(None)
     }
@@ -76,12 +93,12 @@ pub async fn create_pod(
 /// go.
 pub async fn start_container(
     config: &Config,
-    podman_pod_name: &str,
+    pod_state: &PodState,
     container: &PodContainerSpec,
 ) -> std::io::Result<bool> {
     let podman_container_name = format!(
         "{prefix}-{name}",
-        prefix = podman_pod_name,
+        prefix = pod_state.name,
         name = container.name,
     );
 
@@ -91,7 +108,7 @@ pub async fn start_container(
         "run",
         "--detach",
         "--pull=newer",
-        &format!("--pod={podman_pod_name}"),
+        &format!("--pod={pod_name}", pod_name = pod_state.name),
         &format!("--name={podman_container_name}"),
     ]);
 
@@ -126,9 +143,9 @@ pub async fn start_container(
 
 /// Wait for all the containers in the pod to terminate.  Returns `true` if all
 /// containers exited successfully.
-pub async fn wait_for_containers(config: &Config, podman_pod_name: &str) -> std::io::Result<bool> {
+pub async fn wait_for_containers(config: &Config, pod_state: &PodState) -> std::io::Result<bool> {
     loop {
-        if let Some(all_ok) = container_status(config, podman_pod_name).await? {
+        if let Some(all_ok) = container_status(config, &pod_state.name).await? {
             return Ok(all_ok);
         } else {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)).await;
@@ -137,11 +154,11 @@ pub async fn wait_for_containers(config: &Config, podman_pod_name: &str) -> std:
 }
 
 /// Terminate any running containers in a pod, and delete it.
-pub async fn terminate_pod(config: &Config, podman_pod_name: &str) -> std::io::Result<()> {
+pub async fn terminate_pod(config: &Config, pod_state: &PodState) -> std::io::Result<()> {
     let mut cmd = Command::new(config.podman.clone());
     cmd.stdin(Stdio::null())
         .kill_on_drop(true)
-        .args(["pod", "rm", "-f", podman_pod_name]);
+        .args(["pod", "rm", "-f", &pod_state.name]);
 
     // TODO: handle exit failure
     let _ = cmd.spawn()?.wait().await?;
@@ -185,4 +202,49 @@ async fn container_status(config: &Config, podman_pod_name: &str) -> std::io::Re
     } else {
         Ok(Some(all_ok))
     }
+}
+
+/// Get the ID of the infrastructure container of the given pod
+async fn get_pod_infra_container_id(
+    config: &Config,
+    podman_pod_name: &str,
+) -> std::io::Result<String> {
+    let mut cmd = Command::new(config.podman.clone());
+    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
+        "pod",
+        "inspect",
+        "--format={{.InfraContainerID}}",
+        podman_pod_name,
+    ]);
+    let output = cmd.output().await?;
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    Ok(stdout.trim().to_owned())
+}
+
+/// Start a container by ID.
+async fn start_container_by_id(config: &Config, container_id: &str) -> std::io::Result<()> {
+    let mut cmd = Command::new(config.podman.clone());
+    cmd.stdin(Stdio::null())
+        .kill_on_drop(true)
+        .args(["container", "start", container_id]);
+
+    // TODO: handle exit failure
+    let _ = cmd.spawn()?.wait().await?;
+    Ok(())
+}
+
+/// Get the IP address of a container, which must have been started.
+async fn get_container_ip_by_id(config: &Config, container_id: &str) -> std::io::Result<Ipv4Addr> {
+    let mut cmd = Command::new(config.podman.clone());
+    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
+        "container",
+        "inspect",
+        "--format={{.NetworkSettings.IPAddress}}",
+        container_id,
+    ]);
+    let output = cmd.output().await?;
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    Ok(stdout.trim().parse().unwrap())
 }
