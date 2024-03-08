@@ -1,17 +1,91 @@
 use rand::prelude::SliceRandom;
 
-/// Characters for encoding to base 36.
-pub static BASE36_DIGITS: &[char] = &[
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
-    'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+/// Ominous adjectives
+pub static FIRST_PART: &[&str] = &[
+    "abnormal",
+    "accursed",
+    "amorphous",
+    "antediluvian",
+    "antique",
+    "atavistic",
+    "blasphemous",
+    "charnel",
+    "cthonian",
+    "cyclopean",
+    "dank",
+    "decadent",
+    "demonic",
+    "eldritch",
+    "fungoid",
+    "furtive",
+    "gibbering",
+    "gibbous",
+    "hideous",
+    "hoary",
+    "indescribable",
+    "loath",
+    "mortal",
+    "nameless",
+    "noisome",
+    "noneuclidean",
+    "shunned",
+    "spectral",
+    "squamous",
+    "stygian",
+    "unmentionable",
+    "unutterable",
 ];
 
-/// Generate a random alphanumeric string.
-pub fn random_string(len: usize) -> String {
+/// Cute nouns
+pub static LAST_PART: &[&str] = &[
+    "axolotl",
+    "bat",
+    "bear",
+    "bumblebee",
+    "capybara",
+    "cat",
+    "fox",
+    "gecko",
+    "goat",
+    "hedgehog",
+    "kitten",
+    "koala",
+    "lemming",
+    "loris",
+    "mink",
+    "mole",
+    "otter",
+    "owl",
+    "panda",
+    "penguin",
+    "pika",
+    "puppy",
+    "quokka",
+    "rabbit",
+    "seal",
+    "sheep",
+    "shrew",
+    "snail",
+    "squirrel",
+    "tanuki",
+    "weasel",
+    "wombat",
+];
+
+/// Digits
+pub static DIGITS: &[char] = &['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
+/// Generate a random name, suitable for a resource.
+pub fn random_name() -> String {
     let mut rng = rand::thread_rng();
-    let mut out = String::with_capacity(len);
-    for _ in 0..len {
-        out.push(*BASE36_DIGITS.choose(&mut rng).unwrap());
-    }
-    out
+
+    format!(
+        "{first_part}-{last_part}-{d1}{d2}{d3}{d4}",
+        first_part = FIRST_PART.choose(&mut rng).unwrap(),
+        last_part = LAST_PART.choose(&mut rng).unwrap(),
+        d1 = DIGITS.choose(&mut rng).unwrap(),
+        d2 = DIGITS.choose(&mut rng).unwrap(),
+        d3 = DIGITS.choose(&mut rng).unwrap(),
+        d4 = DIGITS.choose(&mut rng).unwrap(),
+    )
 }

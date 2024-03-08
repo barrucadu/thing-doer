@@ -14,11 +14,6 @@ use nodelib::util;
 /// thing-doer integration test tools: pod spammer.
 #[derive(Clone, Debug, Parser)]
 struct Args {
-    /// Prefix to use in pod names and the "createdBy" to add to the pod
-    /// metadata.  The full name is this plus a random suffix.
-    #[clap(long, default_value = "spam")]
-    pub name: String,
-
     /// How long to wait between creating new pods.
     #[clap(
         long,
@@ -36,46 +31,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let config = Args::parse();
-    let name = format!(
-        "{name}-{suffix}",
-        name = config.name,
-        suffix = util::random_string(8)
-    );
 
     let cmds = &["no-such-command", "ls", "true", "false", "env"];
     let cpus = &[Decimal::new(1, 1), Decimal::new(3, 1)];
     let mems = &[16, 64, 128];
     let mut idx = 0;
     loop {
-        let pod_name = format!("{name}-pod-{idx}");
+        let pod_name = util::random_name();
         let cmd = cmds[idx % cmds.len()];
         let cpu = cpus[idx % cpus.len()];
         let mem = mems[idx % mems.len()];
         tracing::info!(pod_name, cmd, ?cpu, ?mem, "create");
 
-        let spec = PodSpec {
-            containers: vec![PodContainerSpec {
-                name: "cmd".to_owned(),
-                image: "docker.io/library/busybox".to_owned(),
-                entrypoint: None,
-                cmd: vec![cmd.to_owned()],
-                env: HashMap::from([
-                    ("FOO".to_owned(), "1".to_owned()),
-                    ("BAR".to_owned(), "2".to_owned()),
-                ]),
-                ports: Vec::new(),
-                resources: Some(ContainerResourceSpec {
-                    requests: Some(ContainerResourceSpecInner {
-                        cpu: Some(cpu),
-                        memory: Some(mem),
+        let pod = PodResource::new(
+            pod_name.clone(),
+            PodType::Pod,
+            PodSpec {
+                containers: vec![PodContainerSpec {
+                    name: "cmd".to_owned(),
+                    image: "docker.io/library/busybox".to_owned(),
+                    entrypoint: None,
+                    cmd: vec![cmd.to_owned()],
+                    env: HashMap::from([
+                        ("FOO".to_owned(), "1".to_owned()),
+                        ("BAR".to_owned(), "2".to_owned()),
+                    ]),
+                    ports: Vec::new(),
+                    resources: Some(ContainerResourceSpec {
+                        requests: Some(ContainerResourceSpecInner {
+                            cpu: Some(cpu),
+                            memory: Some(mem),
+                        }),
+                        limits: None,
                     }),
-                    limits: None,
-                }),
-            }],
-        };
-        let pod = PodResource::new(pod_name.clone(), PodType::Pod, spec)
-            .with_state(PodState::Created)
-            .with_metadata("createdBy", name.clone());
+                }],
+            },
+        )
+        .with_state(PodState::Created);
 
         let mut kv_client = config.etcd.kv_client().await?;
         resources::put(&config.etcd, pod.clone()).await?;

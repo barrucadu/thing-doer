@@ -49,9 +49,7 @@ pub async fn initialise(
     node_type: NodeType,
     node_spec: NodeSpec,
 ) -> Result<State, Error> {
-    let name = config
-        .name
-        .unwrap_or(format!("n{suffix}", suffix = util::random_string(8),));
+    let name = config.name.unwrap_or(util::random_name());
 
     if heartbeat::is_alive(&config.etcd, &name).await? {
         tracing::error!(

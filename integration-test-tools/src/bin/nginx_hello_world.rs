@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let config = Args::parse();
-    let pod_name = format!("nginx-{suffix}", suffix = util::random_string(8));
+    let pod_name = util::random_name();
 
     let pod = PodResource::new(
         pod_name.clone(),
