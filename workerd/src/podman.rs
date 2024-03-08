@@ -55,7 +55,6 @@ pub async fn create_pod(
         "pod",
         "create",
         &format!("--network={network}", network = config.bridge_network),
-        &podman_pod_name,
     ]);
     for container in &pod.spec.containers {
         for port in &container.ports {
@@ -72,6 +71,7 @@ pub async fn create_pod(
             };
         }
     }
+    cmd.arg(&podman_pod_name);
 
     let exit_status = cmd.spawn()?.wait().await?;
     if exit_status.success() {
