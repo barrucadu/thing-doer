@@ -1,5 +1,7 @@
+use serde_json::Value;
 use std::net::Ipv4Addr;
 use std::process::Stdio;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::process::Command;
 
@@ -26,6 +28,14 @@ pub struct Config {
     pub bridge_network: String,
 }
 
+impl Config {
+    fn command(&self) -> Command {
+        let mut cmd = Command::new(self.podman.clone());
+        cmd.stdin(Stdio::null()).kill_on_drop(true);
+        cmd
+    }
+}
+
 /// State of a created pod.
 #[derive(Debug)]
 pub struct PodState {
@@ -50,8 +60,8 @@ pub async fn create_pod(
         name = pod.name,
     );
 
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
+    let mut cmd = config.command();
+    cmd.args([
         "pod",
         "create",
         &format!("--network={network}", network = config.bridge_network),
@@ -102,8 +112,8 @@ pub async fn start_container(
         name = container.name,
     );
 
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
+    let mut cmd = config.command();
+    cmd.args([
         "container",
         "run",
         "--detach",
@@ -155,10 +165,8 @@ pub async fn wait_for_containers(config: &Config, pod_state: &PodState) -> std::
 
 /// Terminate any running containers in a pod, and delete it.
 pub async fn terminate_pod(config: &Config, pod_state: &PodState) -> std::io::Result<()> {
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null())
-        .kill_on_drop(true)
-        .args(["pod", "rm", "-f", &pod_state.name]);
+    let mut cmd = config.command();
+    cmd.args(["pod", "rm", "-f", &pod_state.name]);
 
     // TODO: handle exit failure
     let _ = cmd.spawn()?.wait().await?;
@@ -173,27 +181,17 @@ pub async fn terminate_pod(config: &Config, pod_state: &PodState) -> std::io::Re
 /// Otherwise returns `Some(bool)` with `true` if all the containers exited with
 /// status code "0", otherwise `false`.
 async fn container_status(config: &Config, podman_pod_name: &str) -> std::io::Result<Option<bool>> {
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
-        "ps",
-        "--all",
-        &format!("--filter=pod={podman_pod_name}"),
-        "--format={{.Names}},{{.Exited}},{{.ExitCode}}",
-    ]);
-    let output = cmd.output().await?;
-    let stdout = String::from_utf8(output.stdout).unwrap();
-
     let mut running = false;
     let mut all_ok = true;
-    for line in stdout.lines() {
-        let bits = line.split(',').collect::<Vec<_>>();
-        // skip over infra containers by ensuring the names match what we expect
-        if bits[0].split_once(&format!("{podman_pod_name}-")).is_some() {
-            if bits[1] == "false" {
-                running = true;
-            } else {
-                all_ok = all_ok && bits[2] == "0";
-            }
+    for container in podman_ps(config, podman_pod_name).await? {
+        if container["IsInfra"].as_bool() == Some(true) {
+            continue;
+        }
+
+        if container["Exited"].as_bool() == Some(false) {
+            running = true;
+        } else {
+            all_ok = all_ok && (container["ExitCode"].as_u64() == Some(0));
         }
     }
 
@@ -209,25 +207,16 @@ async fn get_pod_infra_container_id(
     config: &Config,
     podman_pod_name: &str,
 ) -> std::io::Result<String> {
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
-        "pod",
-        "inspect",
-        "--format={{.InfraContainerID}}",
-        podman_pod_name,
-    ]);
-    let output = cmd.output().await?;
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value = podman_inspect(config, "pod", podman_pod_name).await?;
+    let field = value["InfraContainerID"].as_str().unwrap();
 
-    Ok(stdout.trim().to_owned())
+    Ok(field.to_owned())
 }
 
 /// Start a container by ID.
 async fn start_container_by_id(config: &Config, container_id: &str) -> std::io::Result<()> {
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null())
-        .kill_on_drop(true)
-        .args(["container", "start", container_id]);
+    let mut cmd = config.command();
+    cmd.args(["container", "start", container_id]);
 
     // TODO: handle exit failure
     let _ = cmd.spawn()?.wait().await?;
@@ -236,15 +225,39 @@ async fn start_container_by_id(config: &Config, container_id: &str) -> std::io::
 
 /// Get the IP address of a container, which must have been started.
 async fn get_container_ip_by_id(config: &Config, container_id: &str) -> std::io::Result<Ipv4Addr> {
-    let mut cmd = Command::new(config.podman.clone());
-    cmd.stdin(Stdio::null()).kill_on_drop(true).args([
-        "container",
-        "inspect",
-        "--format={{.NetworkSettings.IPAddress}}",
-        container_id,
-    ]);
-    let output = cmd.output().await?;
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value = podman_inspect(config, "container", container_id).await?;
+    let field = value[0]["NetworkSettings"]["Networks"][&config.bridge_network]["IPAddress"]
+        .as_str()
+        .unwrap();
+    let address = Ipv4Addr::from_str(field).unwrap();
 
-    Ok(stdout.trim().parse().unwrap())
+    Ok(address)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// Return the `podman inspect` json for a podman entity.
+async fn podman_inspect(config: &Config, etype: &str, ename: &str) -> std::io::Result<Value> {
+    let mut cmd = config.command();
+    let output = cmd.args([etype, "inspect", ename]).output().await?;
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    Ok(value)
+}
+
+/// Return the `podman ps` json for a podman pod.
+async fn podman_ps(config: &Config, pname: &str) -> std::io::Result<Vec<Value>> {
+    let mut cmd = config.command();
+    let output = cmd
+        .args([
+            "ps",
+            "--all",
+            "--format=json",
+            &format!("--filter=pod={pname}"),
+        ])
+        .output()
+        .await?;
+    let value = serde_json::from_slice(&output.stdout).unwrap();
+
+    Ok(value)
 }
