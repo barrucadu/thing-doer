@@ -1,11 +1,8 @@
 [workspace]
 
 members = [
+  "crates/*",
   "integration-test-tools",
-  "nodelib",
-  "reaperd",
-  "schedulerd",
-  "workerd",
 ]
 
 resolver = "2"
