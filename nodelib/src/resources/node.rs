@@ -2,6 +2,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
+use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use crate::error::ResourceError;
@@ -76,6 +77,10 @@ impl FromStr for NodeState {
 /// A node resource specification.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct NodeSpec {
+    /// Cluster-reachable IP address.  Only set for worker nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<Ipv4Addr>,
+
     /// Resource limits.  Only set for worker nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<NodeLimitSpec>,

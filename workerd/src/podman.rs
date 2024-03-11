@@ -40,6 +40,7 @@ impl Config {
 #[derive(Debug)]
 pub struct PodState {
     pub name: String,
+    pub hostname: String,
     pub infra_container_id: String,
     pub address: Ipv4Addr,
 }
@@ -49,6 +50,7 @@ pub struct PodState {
 pub async fn create_pod(
     config: &Config,
     my_name: &str,
+    dns_ip: Ipv4Addr,
     pod: &PodResource,
 ) -> std::io::Result<Option<PodState>> {
     let podman_pod_name = format!(
@@ -64,6 +66,7 @@ pub async fn create_pod(
     cmd.args([
         "pod",
         "create",
+        &format!("--dns={dns_ip}"),
         &format!("--network={network}", network = config.bridge_network),
     ]);
     for container in &pod.spec.containers {
@@ -91,6 +94,7 @@ pub async fn create_pod(
         let address = get_container_ip_by_id(config, &infra_container_id).await?;
         Ok(Some(PodState {
             name: podman_pod_name,
+            hostname: pod.name.clone(),
             infra_container_id,
             address,
         }))

@@ -51,6 +51,12 @@ pub fn resource(config: &Config, res_type: &str) -> String {
     format!("{prefix}/resource/{res_type}/", prefix = config.prefix)
 }
 
+/// Prefix under which domain names are written.  Keys are domain names, values
+/// are IP addresses.
+pub fn domain_name(config: &Config) -> String {
+    format!("{prefix}/dns/", prefix = config.prefix)
+}
+
 /// Get a `range_end` to cover all keys under the given prefix.
 pub fn range_end(key_prefix: &str) -> Vec<u8> {
     // "If the range_end is one bit larger than the given key, then all keys

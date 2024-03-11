@@ -98,6 +98,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 
 [[package]]
+name = "async-recursion"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd55a5ba1179988837d24ab4c7cc8ed6efdeff578ede0416b4225a5fca35bd0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.50",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -341,6 +352,28 @@ name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
+
+[[package]]
+name = "dns-resolver"
+version = "0.1.0"
+source = "git+https://github.com/barrucadu/resolved.git#50feae540f04fea0c6e361d73cb833adcd387aba"
+dependencies = [
+ "async-recursion",
+ "bytes",
+ "dns-types",
+ "priority-queue",
+ "rand",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dns-types"
+version = "0.1.0"
+source = "git+https://github.com/barrucadu/resolved.git#50feae540f04fea0c6e361d73cb833adcd387aba"
+dependencies = [
+ "bytes",
+]
 
 [[package]]
 name = "either"
@@ -815,6 +848,16 @@ checksum = "a41cf62165e97c7f814d2221421dbb9afcbcdb0a88068e5ea206e19951c2cbb5"
 dependencies = [
  "proc-macro2",
  "syn 2.0.50",
+]
+
+[[package]]
+name = "priority-queue"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0bda9164fe05bc9225752d54aae413343c36f684380005398a6a8fde95fe785"
+dependencies = [
+ "autocfg",
+ "indexmap 1.9.3",
 ]
 
 [[package]]
@@ -1757,7 +1800,10 @@ dependencies = [
 name = "workerd"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "clap",
+ "dns-resolver",
+ "dns-types",
  "nodelib",
  "rust_decimal",
  "rust_decimal_macros",

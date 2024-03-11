@@ -4,12 +4,16 @@ pub mod heartbeat;
 pub mod resources;
 pub mod util;
 
+use std::net::Ipv4Addr;
 use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
+use tonic::Request;
 
 use crate::error::*;
 use crate::etcd::leaser;
+use crate::etcd::pb::etcdserverpb::PutRequest;
+use crate::etcd::prefix;
 use crate::resources::node::*;
 
 /// Exit code in case the initialisation process failed.
@@ -50,6 +54,7 @@ pub async fn initialise(
     node_spec: NodeSpec,
 ) -> Result<State, Error> {
     let name = config.name.unwrap_or(util::random_name());
+    let address = node_spec.address;
 
     if heartbeat::is_alive(&config.etcd, &name).await? {
         tracing::error!(
@@ -78,6 +83,10 @@ pub async fn initialise(
         expire_alive_rx,
         alive_lease,
     ));
+
+    if let Some(ip) = address {
+        create_node_dns_record(&config.etcd, alive_lease_id, &name, ip).await?;
+    }
 
     Ok(State {
         name,
@@ -111,4 +120,30 @@ pub async fn signal_channel(ch: oneshot::Sender<oneshot::Sender<()>>) {
     let (tx, rx) = oneshot::channel();
     let _ = ch.send(tx);
     let _ = rx.await;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// Create the DNS record for a node.
+async fn create_node_dns_record(
+    etcd_config: &etcd::Config,
+    lease_id: leaser::LeaseId,
+    name: &str,
+    address: Ipv4Addr,
+) -> Result<(), Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    kv_client
+        .put(Request::new(PutRequest {
+            key: format!(
+                "{prefix}{name}.node.cluster.local.",
+                prefix = prefix::domain_name(etcd_config),
+            )
+            .into(),
+            value: address.to_string().into(),
+            lease: lease_id.0,
+            ..Default::default()
+        }))
+        .await?;
+
+    Ok(())
 }
