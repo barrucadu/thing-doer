@@ -72,12 +72,7 @@ pub async fn create_leased_a_record(
     let mut kv_client = etcd_config.kv_client().await?;
     kv_client
         .put(Request::new(PutRequest {
-            key: format!(
-                "{prefix}{domain}",
-                prefix = prefix::domain_name(etcd_config),
-                domain = domain_name_for(namespace, hostname),
-            )
-            .into(),
+            key: a_record_key(etcd_config, namespace, hostname).into(),
             value: address.to_string().into(),
             lease: lease_id.0,
             ..Default::default()
@@ -96,10 +91,60 @@ pub async fn delete_record(
     let mut kv_client = etcd_config.kv_client().await?;
     kv_client
         .delete_range(Request::new(DeleteRangeRequest {
-            key: format!(
-                "{prefix}{domain}",
-                prefix = prefix::domain_name(etcd_config),
-                domain = domain_name_for(namespace, hostname),
+            key: a_record_key(etcd_config, namespace, hostname).into(),
+            ..Default::default()
+        }))
+        .await?;
+
+    Ok(())
+}
+
+/// Add an alias record to a name, optionally associated with a lease.
+pub async fn append_alias_record(
+    etcd_config: &etcd::Config,
+    lease_id: Option<LeaseId>,
+    from_namespace: Namespace,
+    from_hostname: &str,
+    to_namespace: Namespace,
+    to_hostname: &str,
+) -> Result<(), Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    kv_client
+        .put(Request::new(PutRequest {
+            key: alias_record_key(
+                etcd_config,
+                from_namespace,
+                from_hostname,
+                to_namespace,
+                to_hostname,
+            )
+            .into(),
+            value: b"alias".into(),
+            lease: lease_id.map_or(0, |l| l.0),
+            ..Default::default()
+        }))
+        .await?;
+
+    Ok(())
+}
+
+/// Delete an alias record from a name without waiting for lease expiry.
+pub async fn delete_alias_record(
+    etcd_config: &etcd::Config,
+    from_namespace: Namespace,
+    from_hostname: &str,
+    to_namespace: Namespace,
+    to_hostname: &str,
+) -> Result<(), Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    kv_client
+        .delete_range(Request::new(DeleteRangeRequest {
+            key: alias_record_key(
+                etcd_config,
+                from_namespace,
+                from_hostname,
+                to_namespace,
+                to_hostname,
             )
             .into(),
             ..Default::default()
@@ -117,6 +162,7 @@ pub async fn delete_record(
 pub enum Namespace {
     Node,
     Pod,
+    Special,
 }
 
 impl fmt::Display for Namespace {
@@ -124,6 +170,7 @@ impl fmt::Display for Namespace {
         match self {
             Self::Node => write!(f, "node"),
             Self::Pod => write!(f, "pod"),
+            Self::Special => write!(f, "special"),
         }
     }
 }
@@ -131,4 +178,31 @@ impl fmt::Display for Namespace {
 /// Construct a domain name.
 pub fn domain_name_for(namespace: Namespace, hostname: &str) -> String {
     format!("{hostname}.{namespace}.{APEX}")
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// etcd key for an A record
+fn a_record_key(etcd_config: &etcd::Config, namespace: Namespace, hostname: &str) -> String {
+    format!(
+        "{prefix}{domain}",
+        prefix = prefix::domain_name(etcd_config),
+        domain = domain_name_for(namespace, hostname),
+    )
+}
+
+/// etcd key for an alias record
+fn alias_record_key(
+    etcd_config: &etcd::Config,
+    from_namespace: Namespace,
+    from_hostname: &str,
+    to_namespace: Namespace,
+    to_hostname: &str,
+) -> String {
+    format!(
+        "{prefix}{from_domain}/{to_domain}",
+        prefix = prefix::domain_name(etcd_config),
+        from_domain = domain_name_for(from_namespace, from_hostname),
+        to_domain = domain_name_for(to_namespace, to_hostname),
+    )
 }

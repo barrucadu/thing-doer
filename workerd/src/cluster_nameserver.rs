@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process;
 use std::str::FromStr;
@@ -57,6 +57,7 @@ pub async fn initialise(
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
         a_records: HashMap::new(),
+        alias_records: HashMap::new(),
         empty_zone,
         // will be filled in by the `Watcher` impl
         zones: Zones::default(),
@@ -88,6 +89,7 @@ pub async fn initialise(
 struct WatchState {
     pub etcd_config: etcd::Config,
     pub a_records: HashMap<DomainName, Ipv4Addr>,
+    pub alias_records: HashMap<DomainName, HashSet<DomainName>>,
     pub empty_zone: Zone,
     pub zones: Zones,
 }
@@ -99,39 +101,114 @@ impl watcher::Watcher for WatchState {
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, name)) = key.split_once(&prefix) {
-            if let Some(domain) = DomainName::from_dotted_string(name) {
-                if is_create {
-                    match String::from_utf8(kv.value) {
-                        Ok(address_str) => match Ipv4Addr::from_str(&address_str) {
-                            Ok(address) => {
-                                tracing::info!(name, ?address, "got new A record");
-                                self.a_records.insert(domain, address);
-                            }
-                            Err(error) => tracing::warn!(name, ?error, "could not parse A record"),
-                        },
-                        Err(error) => tracing::warn!(name, ?error, "could not parse A record"),
-                    }
-                } else {
-                    self.a_records.remove(&domain);
-                }
+        if let Some((_, suffix)) = key.split_once(&prefix) {
+            if let Some((from, to)) = suffix.split_once('/') {
+                self.add_or_remove_alias_record(is_create, from, to);
             } else {
-                tracing::warn!(?key, "could not parse domain name");
+                self.add_or_remove_a_record(is_create, suffix, kv.value)
             }
         } else {
             tracing::warn!(?key, "unexpected watch key");
         }
 
-        let mut zone = self.empty_zone.clone();
+        self.regenerate_zones();
+    }
+}
+
+impl WatchState {
+    fn add_or_remove_a_record(&mut self, is_create: bool, name: &str, value: Vec<u8>) {
+        if let Some(named) = DomainName::from_dotted_string(name) {
+            if is_create {
+                match String::from_utf8(value) {
+                    Ok(address_str) => match Ipv4Addr::from_str(&address_str) {
+                        Ok(address) => {
+                            tracing::info!(name, ?address, "got new A record");
+                            self.a_records.insert(named, address);
+                        }
+                        Err(error) => tracing::warn!(name, ?error, "could not parse A record"),
+                    },
+                    Err(error) => tracing::warn!(name, ?error, "could not parse A record"),
+                }
+            } else {
+                tracing::info!(name, "removed A record");
+                self.a_records.remove(&named);
+            }
+        } else {
+            tracing::warn!(name, "could not parse domain name");
+        }
+    }
+
+    fn add_or_remove_alias_record(&mut self, is_create: bool, from: &str, to: &str) {
+        match (
+            DomainName::from_dotted_string(from),
+            DomainName::from_dotted_string(to),
+        ) {
+            (Some(fromd), Some(tod)) => {
+                let mut aliases = self.alias_records.remove(&fromd).unwrap_or_default();
+                if is_create {
+                    tracing::info!(from, to, "got new alias record");
+                    aliases.insert(tod);
+                } else {
+                    tracing::info!(from, to, "removed alias record");
+                    aliases.remove(&tod);
+                }
+                if !aliases.is_empty() {
+                    self.alias_records.insert(fromd, aliases);
+                }
+            }
+            _ => {
+                tracing::warn!(from, to, "could not parse domain name");
+            }
+        }
+    }
+
+    // TODO: make this a bit more efficient than recomputing everything on every
+    // change
+    fn regenerate_zones(&mut self) {
+        let mut records = HashMap::with_capacity(self.a_records.len() + self.alias_records.len());
+
         for (name, address) in &self.a_records {
-            // use a TTL of 0 so they just inherit the value from the zone
-            zone.insert(name, RecordTypeWithData::A { address: *address }, 0)
+            records.insert(name.clone(), HashSet::from([*address]));
+        }
+        for name in self.alias_records.keys() {
+            self.resolve_alias_records(&mut records, name);
         }
 
+        let mut zone = self.empty_zone.clone();
+        for (name, addresses) in records.drain() {
+            for address in addresses {
+                // use a TTL of 0 so they just inherit the value from the zone
+                zone.insert(&name, RecordTypeWithData::A { address }, 0)
+            }
+        }
         let mut zones = Zones::default();
         zones.insert(zone);
 
         self.zones = zones;
+    }
+
+    fn resolve_alias_records(
+        &self,
+        records: &mut HashMap<DomainName, HashSet<Ipv4Addr>>,
+        name: &DomainName,
+    ) -> HashSet<Ipv4Addr> {
+        if let Some(rs) = records.get(name) {
+            return rs.clone();
+        }
+
+        if let Some(aliases) = self.alias_records.get(name) {
+            let mut rs = HashSet::with_capacity(aliases.len());
+            for alias in aliases {
+                rs = rs
+                    .union(&self.resolve_alias_records(records, alias))
+                    .cloned()
+                    .collect::<HashSet<Ipv4Addr>>();
+            }
+            records.insert(name.clone(), rs.clone());
+            rs
+        } else {
+            HashSet::new()
+        }
     }
 }
 
