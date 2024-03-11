@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::oneshot;
 
 use nodelib::resources::pod::*;
 
@@ -169,14 +170,30 @@ pub async fn start_container(
     Ok(exit_status.success())
 }
 
+/// Result of container execution.
+pub enum WFC {
+    Terminated(bool),
+    Signal(oneshot::Sender<()>),
+}
+
 /// Wait for all the containers in the pod to terminate.  Returns `true` if all
 /// containers exited successfully.
-pub async fn wait_for_containers(config: &Config, pod_state: &PodState) -> std::io::Result<bool> {
+pub async fn wait_for_containers(
+    config: &Config,
+    pod_state: &PodState,
+    mut kill_rx: &mut oneshot::Receiver<oneshot::Sender<()>>,
+) -> std::io::Result<WFC> {
     loop {
         if let Some(all_ok) = container_status(config, &pod_state.name).await? {
-            return Ok(all_ok);
+            return Ok(WFC::Terminated(all_ok));
         } else {
-            tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)) => (),
+                ch = &mut kill_rx => {
+                    let _ = terminate_pod(config, pod_state).await;
+                    return Ok(WFC::Signal(ch.unwrap()));
+                }
+            }
         }
     }
 }

@@ -55,6 +55,8 @@ pub enum PodState {
     ExitFailure,
     /// Failed to start
     Errored,
+    /// Forcibly killed
+    Killed,
     /// Presumed dead, due to worker failure
     Dead,
 }
@@ -67,6 +69,7 @@ impl PodState {
             | Self::ExitSuccess
             | Self::ExitFailure
             | Self::Errored
+            | Self::Killed
             | Self::Dead => true,
             Self::Created | Self::Scheduled | Self::Accepted | Self::Running => false,
         }

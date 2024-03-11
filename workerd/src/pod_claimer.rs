@@ -30,10 +30,11 @@ pub async fn initialise(
     my_name: String,
     lease_id: LeaseId,
     work_pod_tx: Sender<PodResource>,
-) -> Result<(), Error> {
+) -> Result<Handle, Error> {
     let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
 
     let state = Arc::new(RwLock::new(WatchState {
+        running: true,
         etcd_config: etcd_config.clone(),
         my_name: my_name.clone(),
         unclaimed_pods: HashMap::new(),
@@ -57,12 +58,26 @@ pub async fn initialise(
     tokio::spawn(retry_claim_task(state.clone()));
     tokio::spawn(retry_work_task(state.clone(), work_pod_tx));
 
-    Ok(())
+    Ok(Handle { ws: state.clone() })
+}
+
+/// To signal that the claimer should stop claiming things.
+pub struct Handle {
+    ws: Arc<RwLock<WatchState>>,
+}
+
+impl Handle {
+    /// Stop claiming new pods.
+    pub async fn terminate(self) {
+        let mut inner = self.ws.write().await;
+        inner.running = false;
+    }
 }
 
 /// State to schedule pods.
 #[derive(Debug)]
 struct WatchState {
+    pub running: bool,
     pub my_name: String,
     pub etcd_config: etcd::Config,
     pub unclaimed_pods: HashMap<String, PodResource>,
@@ -153,6 +168,10 @@ async fn claim_task(
 ) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
+        if !w.running {
+            tracing::info!(pod_name, "got claim request but worker is terminating");
+            return;
+        }
         if let Some(resource) = w.unclaimed_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got claim request");
             match claim_pod(&w, lease_id, resource.clone()).await {

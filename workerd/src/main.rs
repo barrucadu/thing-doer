@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory,
     )
     .await?;
-    let work_pod_tx = pod_worker::initialise(
+    let (pw_handle, work_pod_tx) = pod_worker::initialise(
         etcd.clone(),
         podman,
         state.name.clone(),
@@ -103,10 +103,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         limit_tx,
     )
     .await?;
-    pod_claimer::initialise(etcd, state.name.clone(), state.alive_lease_id, work_pod_tx).await?;
+    let pc_handle =
+        pod_claimer::initialise(etcd, state.name.clone(), state.alive_lease_id, work_pod_tx)
+            .await?;
 
     let ch = nodelib::wait_for_sigterm(state).await;
-    // TODO: terminate pods
+
+    // Terminating pods might take a little time if there are lots of them, so
+    // also stop claiming new ones.
+    pc_handle.terminate().await;
+    pw_handle.terminate().await;
+
     nodelib::signal_channel(ch).await;
     process::exit(0)
 }
