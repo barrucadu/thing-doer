@@ -10,7 +10,7 @@ use crate::etcd::pb::etcdserverpb::watch_client::WatchClient;
 pub struct Config {
     /// etcd gRPC endpoints
     #[clap(
-        long,
+        long = "etcd-hosts",
         value_parser,
         value_delimiter = ',',
         default_value = "127.0.0.1:2379",
@@ -20,15 +20,19 @@ pub struct Config {
 
     /// Timeout (in seconds) for connecting to etcd
     #[clap(
-        long,
+        long = "etcd-connect-timeout",
         value_parser = |secs: &str| secs.parse().map(Duration::from_secs),
         default_value = "2",
         env = "ETCD_CONNECT_TIMEOUT",
     )]
     pub connect_timeout: Duration,
 
-    /// Prefix to store keys under in etcd.
-    #[clap(long, default_value = "/thing-doer", env = "ETCD_PREFIX")]
+    /// Prefix to store etcd keys under.
+    #[clap(
+        long = "etcd-prefix",
+        default_value = "/thing-doer",
+        env = "ETCD_PREFIX"
+    )]
     pub prefix: String,
 }
 

@@ -15,16 +15,30 @@ pub static POLL_INTERVAL: u64 = 1;
 #[group(skip)]
 pub struct Config {
     /// Name of the podman binary.  Defaults to "podman".
-    #[clap(long, value_parser, default_value = "podman", env = "PODMAN_CMD")]
+    #[clap(
+        long = "podman-command",
+        value_parser,
+        default_value = "podman",
+        env = "PODMAN_CMD"
+    )]
     pub podman: String,
 
-    /// Prefix to prepend to pod names, if not given defaults to the node name.
-    #[clap(long, value_parser, env = "PODMAN_POD_NAME_PREFIX")]
+    /// Prefix to prepend to pod names so they can be easily identified in
+    /// `podman` command output.  If not given defaults to the node name.
+    #[clap(
+        long = "podman-pod-name-prefix",
+        value_parser,
+        env = "PODMAN_POD_NAME_PREFIX"
+    )]
     pub pod_name_prefix: Option<String>,
 
     /// Bridge network to use.  This must already exist, and be set up so that
     /// all the pods in the cluster can communicate.
-    #[clap(long, value_parser, env = "PODMAN_BRIDGE_NETWORK")]
+    #[clap(
+        long = "podman-bridge-network",
+        value_parser,
+        env = "PODMAN_BRIDGE_NETWORK"
+    )]
     pub bridge_network: String,
 }
 

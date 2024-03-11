@@ -19,21 +19,6 @@ use crate::resources::node::*;
 /// Exit code in case the initialisation process failed.
 pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;
 
-#[derive(Clone, Debug, clap::Args)]
-#[group(skip)]
-pub struct Config {
-    /// Name of this instance, must be unique across the cluster.  If
-    /// unspecified, a random name is generated.
-    #[clap(
-        long,
-        value_parser = |s: &str| Ok::<Option<String>, String>(Some(s.to_lowercase())),
-    )]
-    pub name: Option<String>,
-
-    #[command(flatten)]
-    pub etcd: etcd::Config,
-}
-
 /// The static state of the node, set at initialisation time.
 #[derive(Debug)]
 pub struct State {
@@ -49,14 +34,15 @@ pub struct State {
 /// Returns the node name, which will be a random unique one if not specified by
 /// the `config`, and the liveness lease ID.
 pub async fn initialise(
-    config: Config,
+    etcd_config: etcd::Config,
+    node_name: Option<String>,
     node_type: NodeType,
     node_spec: NodeSpec,
 ) -> Result<State, Error> {
-    let name = config.name.unwrap_or(util::random_name());
+    let name = node_name.unwrap_or(util::random_name()).to_lowercase();
     let address = node_spec.address;
 
-    if heartbeat::is_alive(&config.etcd, &name).await? {
+    if heartbeat::is_alive(&etcd_config, &name).await? {
         tracing::error!(
             name,
             "another node with this name is still alive, terminating..."
@@ -66,26 +52,26 @@ pub async fn initialise(
 
     let resource = resources::NodeResource::new(name.clone(), node_type, node_spec)
         .with_state(NodeState::Healthy);
-    resources::put(&config.etcd, resource).await?;
+    resources::put(&etcd_config, resource).await?;
 
-    let (healthy_lease, alive_lease) = heartbeat::establish_leases(&config.etcd, &name).await?;
+    let (healthy_lease, alive_lease) = heartbeat::establish_leases(&etcd_config, &name).await?;
     let alive_lease_id = alive_lease.id;
 
     let (expire_healthy_tx, expire_healthy_rx) = oneshot::channel();
     let (expire_alive_tx, expire_alive_rx) = oneshot::channel();
     tokio::spawn(leaser::task(
-        config.etcd.clone(),
+        etcd_config.clone(),
         expire_healthy_rx,
         healthy_lease,
     ));
     tokio::spawn(leaser::task(
-        config.etcd.clone(),
+        etcd_config.clone(),
         expire_alive_rx,
         alive_lease,
     ));
 
     if let Some(ip) = address {
-        create_node_dns_record(&config.etcd, alive_lease_id, &name, ip).await?;
+        create_node_dns_record(&etcd_config, alive_lease_id, &name, ip).await?;
     }
 
     Ok(State {

@@ -3,6 +3,7 @@ use rust_decimal::Decimal;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process;
 
+use nodelib::etcd;
 use nodelib::resources::node::*;
 
 use workerd::dns;
@@ -14,24 +15,44 @@ use workerd::podman;
 /// thing-doer workerd.
 #[derive(Clone, Debug, Parser)]
 struct Args {
-    #[command(flatten)]
-    pub node: nodelib::Config,
+    /// Name of this instance, must be unique across the cluster.  If
+    /// unspecified, a random name is generated.
+    #[clap(long)]
+    pub name: Option<String>,
 
     /// Address to bind on to provide services to local pods.  Must be reachable
     /// within the cluster.
-    #[clap(long, value_parser, env = "ADDRESS")]
+    #[clap(long = "cluster-address", value_parser, env = "CLUSTER_ADDRESS")]
     pub address: Ipv4Addr,
 
+    #[command(flatten)]
+    pub etcd: etcd::Config,
+
     /// DNS resolver to forward non-cluster DNS queries from pods to.
-    #[clap(long, value_parser, default_value = "1.1.1.1:53", env = "EXTERNAL_DNS")]
+    #[clap(
+        long = "pod-external-dns",
+        value_parser,
+        default_value = "1.1.1.1:53",
+        env = "POD_EXTERNAL_DNS"
+    )]
     pub external_dns: SocketAddr,
 
     /// Available amount of CPU resource.
-    #[clap(long, value_parser, default_value = "1", env = "AVAILABLE_CPU")]
+    #[clap(
+        long = "pod-cpu-limit",
+        value_parser,
+        default_value = "1",
+        env = "POD_CPU_LIMIT"
+    )]
     pub cpu: Decimal,
 
     /// Available amount of memory resource, in megabytes.
-    #[clap(long, value_parser, default_value = "1024", env = "AVAILABLE_MEMORY")]
+    #[clap(
+        long = "pod-memory-limit",
+        value_parser,
+        default_value = "1024",
+        env = "POD_MEMORY_LIMIT"
+    )]
     pub memory: u64,
 
     #[command(flatten)]
@@ -43,17 +64,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().json().init();
 
     let Args {
-        node,
+        name,
         address,
         external_dns,
         cpu,
         memory,
+        etcd,
         podman,
     } = Args::parse();
-    let etcd_config = node.etcd.clone();
 
     let state = nodelib::initialise(
-        node,
+        etcd.clone(),
+        name,
         NodeType::Worker,
         NodeSpec {
             address: Some(address),
@@ -62,10 +84,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    dns::initialise(etcd_config.clone(), &state.name, address, external_dns).await?;
+    dns::initialise(etcd.clone(), &state.name, address, external_dns).await?;
 
     let limit_tx = limits::initialise(
-        etcd_config.clone(),
+        etcd.clone(),
         state.name.clone(),
         state.alive_lease_id,
         cpu,
@@ -73,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     let work_pod_tx = pod_worker::initialise(
-        etcd_config.clone(),
+        etcd.clone(),
         podman,
         state.name.clone(),
         address,
@@ -81,13 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         limit_tx,
     )
     .await?;
-    pod_claimer::initialise(
-        etcd_config,
-        state.name.clone(),
-        state.alive_lease_id,
-        work_pod_tx,
-    )
-    .await?;
+    pod_claimer::initialise(etcd, state.name.clone(), state.alive_lease_id, work_pod_tx).await?;
 
     let ch = nodelib::wait_for_sigterm(state).await;
     // TODO: terminate pods
