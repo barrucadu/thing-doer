@@ -6,7 +6,7 @@ use std::process;
 use nodelib::etcd;
 use nodelib::resources::node::*;
 
-use workerd::dns;
+use workerd::cluster_nameserver;
 use workerd::limits;
 use workerd::pod_claimer;
 use workerd::pod_worker;
@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    dns::initialise(etcd.clone(), &state.name, address, external_dns).await?;
+    cluster_nameserver::initialise(etcd.clone(), &state.name, address, external_dns).await?;
 
     let limit_tx = limits::initialise(
         etcd.clone(),

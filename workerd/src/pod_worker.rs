@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tonic::Request;
 
+use nodelib::dns;
 use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::leaser::LeaseId;
@@ -178,34 +179,28 @@ async fn create_pod_dns_record(
     lease_id: LeaseId,
     pod_state: &podman::PodState,
 ) {
-    let key = format!(
-        "{prefix}{pod_name}.pod.cluster.local.",
-        prefix = prefix::domain_name(etcd_config),
-        pod_name = pod_state.hostname,
-    );
-    let req = PutRequest {
-        key: key.into(),
-        value: pod_state.address.to_string().into(),
-        lease: lease_id.0,
-        ..Default::default()
-    };
-
-    put_request(etcd_config, req).await;
+    while let Err(error) = dns::create_leased_a_record(
+        etcd_config,
+        lease_id,
+        dns::Namespace::Pod,
+        &pod_state.hostname,
+        pod_state.address,
+    )
+    .await
+    {
+        tracing::warn!(?error, "could not create DNS record, retrying...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 /// Delete the key for the DNS record of the pod.
 async fn delete_pod_dns_record(etcd_config: &etcd::Config, pod_state: &podman::PodState) {
-    let key = format!(
-        "{prefix}{pod_name}.pod.cluster.local.",
-        prefix = prefix::domain_name(etcd_config),
-        pod_name = pod_state.hostname,
-    );
-    let req = DeleteRangeRequest {
-        key: key.into(),
-        ..Default::default()
-    };
-
-    delete_request(etcd_config, req).await;
+    while let Err(error) =
+        dns::delete_record(etcd_config, dns::Namespace::Pod, &pod_state.hostname).await
+    {
+        tracing::warn!(?error, "could not destroy DNS record, retrying...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

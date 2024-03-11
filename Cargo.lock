@@ -724,6 +724,7 @@ name = "nodelib"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dns-types",
  "prost",
  "rand",
  "rust_decimal",

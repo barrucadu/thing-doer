@@ -16,21 +16,12 @@ use dns_resolver::util::types::{ProtocolMode, ResolvedRecord};
 use dns_types::protocol::types::*;
 use dns_types::zones::types::*;
 
+use nodelib::dns::cluster_zone;
 use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-
-/// Apex of the cluster DNS zone.
-pub static CLUSTER_DNS_APEX: &str = "cluster.local.";
-
-/// Mailbox of the DNS administrator - I think this is basically irrelevant, but
-/// it has to be specified, so just use `admin.cluster.local`.
-pub static CLUSTER_DNS_SOA_RNAME: &str = "admin.cluster.local.";
-
-/// TTL for records.
-pub static TTL: u32 = 300;
 
 /// How frequently to expire / prune the cache.
 pub static PRUNE_CACHE_INTERVAL: u64 = 300;
@@ -62,20 +53,11 @@ pub async fn initialise(
         }
     };
 
+    let empty_zone = cluster_zone(my_name);
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
         a_records: HashMap::new(),
-        apex: DomainName::from_dotted_string(CLUSTER_DNS_APEX).unwrap(),
-        soa: SOA {
-            mname: DomainName::from_dotted_string(&format!("{my_name}.node.cluster.local."))
-                .unwrap(),
-            rname: DomainName::from_dotted_string(CLUSTER_DNS_SOA_RNAME).unwrap(),
-            serial: 1,
-            refresh: TTL,
-            retry: TTL,
-            expire: 60 * 60,
-            minimum: TTL,
-        },
+        empty_zone,
         // will be filled in by the `Watcher` impl
         zones: Zones::default(),
     }));
@@ -106,8 +88,7 @@ pub async fn initialise(
 struct WatchState {
     pub etcd_config: etcd::Config,
     pub a_records: HashMap<DomainName, Ipv4Addr>,
-    pub apex: DomainName,
-    pub soa: SOA,
+    pub empty_zone: Zone,
     pub zones: Zones,
 }
 
@@ -141,9 +122,10 @@ impl watcher::Watcher for WatchState {
             tracing::warn!(?key, "unexpected watch key");
         }
 
-        let mut zone = Zone::new(self.apex.clone(), Some(self.soa.clone()));
+        let mut zone = self.empty_zone.clone();
         for (name, address) in &self.a_records {
-            zone.insert(name, RecordTypeWithData::A { address: *address }, TTL)
+            // use a TTL of 0 so they just inherit the value from the zone
+            zone.insert(name, RecordTypeWithData::A { address: *address }, 0)
         }
 
         let mut zones = Zones::default();
