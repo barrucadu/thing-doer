@@ -10,8 +10,11 @@ use tonic::Request;
 use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::leaser::LeaseId;
+use nodelib::etcd::pb::etcdserverpb::compare;
 use nodelib::etcd::pb::etcdserverpb::request_op;
-use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest, RequestOp, TxnRequest};
+use nodelib::etcd::pb::etcdserverpb::{
+    Compare, DeleteRangeRequest, PutRequest, RequestOp, TxnRequest,
+};
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
@@ -175,11 +178,14 @@ async fn claim_task(
         if let Some(resource) = w.unclaimed_pods.remove(&pod_name) {
             tracing::info!(pod_name, "got claim request");
             match claim_pod(&w, lease_id, resource.clone()).await {
-                Ok(resource) => {
+                Ok(Some(resource)) => {
                     if let Err(error) = work_pod_tx.try_send(resource.clone()) {
                         tracing::warn!(pod_name, ?error, "could not work pod, retrying...");
                         w.unworked_pods.insert(pod_name.to_owned(), resource);
                     }
+                }
+                Ok(None) => {
+                    tracing::info!(pod_name, "pod killed before claim");
                 }
                 Err(error) => {
                     tracing::warn!(pod_name, ?error, "could not claim pod, retrying...");
@@ -200,27 +206,38 @@ async fn claim_pod(
     state: &WatchState,
     lease_id: LeaseId,
     pod: PodResource,
-) -> Result<PodResource, Error> {
+) -> Result<Option<PodResource>, Error> {
     let pod = pod.with_state(PodState::Accepted);
 
+    // check if the pod resource still exists - if it does, remove it from our
+    // inbox and claim it; if the pod resource has been deleted, just remove it
+    // from our inbox but don't claim it
     let mut kv_client = state.etcd_config.kv_client().await?;
-    kv_client
+    let delete_from_inbox = RequestOp {
+        request: Some(request_op::Request::RequestDeleteRange(
+            DeleteRangeRequest {
+                key: format!(
+                    "{prefix}{pod_name}",
+                    prefix = prefix::worker_inbox(&state.etcd_config, &state.my_name),
+                    pod_name = pod.name
+                )
+                .into(),
+                ..Default::default()
+            },
+        )),
+    };
+    let res = kv_client
         .txn(Request::new(TxnRequest {
-            compare: Vec::new(),
+            // create revision (ie `Create`) != 0 => the key exists
+            compare: vec![Compare {
+                result: compare::CompareResult::NotEqual.into(),
+                target: compare::CompareTarget::Create.into(),
+                key: pod.key(&state.etcd_config).into(),
+                ..Default::default()
+            }],
+            // success: pod still exists
             success: vec![
-                RequestOp {
-                    request: Some(request_op::Request::RequestDeleteRange(
-                        DeleteRangeRequest {
-                            key: format!(
-                                "{prefix}{pod_name}",
-                                prefix = prefix::worker_inbox(&state.etcd_config, &state.my_name),
-                                pod_name = pod.name
-                            )
-                            .into(),
-                            ..Default::default()
-                        },
-                    )),
-                },
+                delete_from_inbox.clone(),
                 RequestOp {
                     request: Some(request_op::Request::RequestPut(PutRequest {
                         key: format!(
@@ -240,9 +257,14 @@ async fn claim_pod(
                     )),
                 },
             ],
-            failure: Vec::new(),
+            // failure: pod does not exist
+            failure: vec![delete_from_inbox],
         }))
         .await?;
 
-    Ok(pod)
+    if res.into_inner().succeeded {
+        Ok(Some(pod))
+    } else {
+        Ok(None)
+    }
 }

@@ -13,7 +13,9 @@ use nodelib::dns;
 use nodelib::error::*;
 use nodelib::etcd;
 use nodelib::etcd::leaser::LeaseId;
-use nodelib::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
+use nodelib::etcd::pb::etcdserverpb::compare;
+use nodelib::etcd::pb::etcdserverpb::request_op;
+use nodelib::etcd::pb::etcdserverpb::{Compare, DeleteRangeRequest, RequestOp, TxnRequest};
 use nodelib::etcd::prefix;
 use nodelib::resources::pod::*;
 
@@ -31,9 +33,10 @@ pub async fn initialise(
     my_ip: Ipv4Addr,
     lease_id: LeaseId,
     limit_state: limits::State,
-) -> Result<(Handle, Sender<PodResource>), Error> {
+) -> Result<(Handle, Sender<PodResource>, Sender<String>), Error> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (work_pod_tx, work_pod_rx) = mpsc::channel(128);
+    let (kill_pod_tx, kill_pod_rx) = mpsc::channel(128);
 
     let prc = PodRunConfig {
         etcd: etcd_config,
@@ -43,9 +46,15 @@ pub async fn initialise(
         node_lease: lease_id,
     };
 
-    tokio::spawn(work_task(prc, limit_state, shutdown_rx, work_pod_rx));
+    tokio::spawn(work_task(
+        prc,
+        limit_state,
+        shutdown_rx,
+        work_pod_rx,
+        kill_pod_rx,
+    ));
 
-    Ok((Handle { shutdown_tx }, work_pod_tx))
+    Ok((Handle { shutdown_tx }, work_pod_tx, kill_pod_tx))
 }
 
 /// To signal that the claimer should stop claiming things.
@@ -78,18 +87,25 @@ async fn work_task(
     limit_state: limits::State,
     mut shutdown_rx: oneshot::Receiver<oneshot::Sender<()>>,
     mut work_pod_rx: Receiver<PodResource>,
+    mut kill_pod_rx: Receiver<String>,
 ) {
     let running_pods = Arc::new(RwLock::new(HashMap::new()));
 
     loop {
         tokio::select! {
-            res = work_pod_rx.recv() => match res {
-                Some(pod) => launch_pod(prc.clone(), limit_state.clone(), running_pods.clone(), pod).await,
+            res = work_pod_rx.recv() => {
+                match res {
+                Some(pod) => tokio::spawn(launch_pod(prc.clone(), limit_state.clone(), running_pods.clone(), pod)),
                 None => break
+            };
             },
-            ch = &mut shutdown_rx => {
-                kill_all_pods(running_pods.clone()).await;
-                let _ = ch.unwrap().send(());
+            msg = kill_pod_rx.recv() => {
+                let pod_name = msg.unwrap();
+                tokio::spawn(kill_pod(running_pods.clone(), pod_name));
+            }
+            msg = &mut shutdown_rx => {
+                let ch = msg.unwrap();
+                tokio::spawn(kill_all_pods(running_pods.clone(), ch));
                 return;
             }
         }
@@ -114,12 +130,35 @@ async fn launch_pod(
         rx
     };
 
-    tokio::spawn(work_pod(prc, limit_state, running_pods, kill_rx, pod));
+    work_pod(prc, limit_state, running_pods, kill_rx, pod).await;
+}
+
+/// Kill a single running pods.
+async fn kill_pod(
+    running_pods: Arc<RwLock<HashMap<String, oneshot::Sender<oneshot::Sender<()>>>>>,
+    pod_name: String,
+) {
+    let block = {
+        let mut inner = running_pods.write().await;
+        if let Some(kill_tx) = inner.remove(&pod_name) {
+            tracing::info!(pod_name, "killing pod due to request");
+            let (tx, rx) = oneshot::channel();
+            let _ = kill_tx.send(tx);
+            Some(rx)
+        } else {
+            None
+        }
+    };
+
+    if let Some(ch) = block {
+        let _ = ch.await;
+    }
 }
 
 /// Kill all running pods.
 async fn kill_all_pods(
     running_pods: Arc<RwLock<HashMap<String, oneshot::Sender<oneshot::Sender<()>>>>>,
+    signal: oneshot::Sender<()>,
 ) {
     let blocks = {
         let mut inner = running_pods.write().await;
@@ -136,6 +175,8 @@ async fn kill_all_pods(
     for block in blocks {
         let _ = block.await;
     }
+
+    let _ = signal.send(());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -251,12 +292,28 @@ async fn delete_pod_dns_record(etcd_config: &etcd::Config, pod_state: &podman::P
     }
 }
 
-/// Set the state of the pod resource, retrying until it succeeds.
+/// Set the state of the pod resource, retrying until it succeeds.  This no-ops
+/// if the pod resource has been deleted.
 ///
 /// TODO: add a retry limit
 async fn set_pod_state(etcd_config: &etcd::Config, pod: PodResource, state: PodState) {
-    let req = pod.with_state(state).to_put_request(etcd_config);
-    while let Err(error) = try_put_request(etcd_config, req.clone()).await {
+    let req = TxnRequest {
+        // create revision (ie `Create`) != 0 => the key exists
+        compare: vec![Compare {
+            result: compare::CompareResult::NotEqual.into(),
+            target: compare::CompareTarget::Create.into(),
+            key: pod.key(etcd_config).into(),
+            ..Default::default()
+        }],
+        success: vec![RequestOp {
+            request: Some(request_op::Request::RequestPut(
+                pod.with_state(state).to_put_request(etcd_config),
+            )),
+        }],
+        failure: Vec::new(),
+    };
+
+    while let Err(error) = try_txn_request(etcd_config, req.clone()).await {
         tracing::warn!(?error, "could not update pod state, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -282,10 +339,10 @@ async fn delete_pod_claim(etcd_config: &etcd::Config, pod_name: &str) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/// Attempt a put request.
-async fn try_put_request(etcd_config: &etcd::Config, req: PutRequest) -> Result<(), Error> {
+/// Attempt a transaction request.
+async fn try_txn_request(etcd_config: &etcd::Config, req: TxnRequest) -> Result<(), Error> {
     let mut kv_client = etcd_config.kv_client().await?;
-    kv_client.put(Request::new(req)).await?;
+    kv_client.txn(Request::new(req)).await?;
 
     Ok(())
 }

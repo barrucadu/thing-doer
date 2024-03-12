@@ -9,6 +9,7 @@ use nodelib::resources::node::*;
 use workerd::cluster_nameserver;
 use workerd::limits;
 use workerd::pod_claimer;
+use workerd::pod_killer;
 use workerd::pod_worker;
 use workerd::podman;
 
@@ -98,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory,
     )
     .await?;
-    let (pw_handle, work_pod_tx) = pod_worker::initialise(
+    let (pw_handle, work_pod_tx, kill_pod_tx) = pod_worker::initialise(
         etcd.clone(),
         podman,
         state.name.clone(),
@@ -107,9 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         limit_tx,
     )
     .await?;
-    let pc_handle =
-        pod_claimer::initialise(etcd, state.name.clone(), state.alive_lease_id, work_pod_tx)
-            .await?;
+    let pc_handle = pod_claimer::initialise(
+        etcd.clone(),
+        state.name.clone(),
+        state.alive_lease_id,
+        work_pod_tx,
+    )
+    .await?;
+    pod_killer::initialise(etcd, kill_pod_tx).await?;
 
     let ch = nodelib::wait_for_sigterm(state).await;
 
