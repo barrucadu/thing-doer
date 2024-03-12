@@ -631,7 +631,6 @@ dependencies = [
  "rust_decimal",
  "serde_json",
  "tokio",
- "tonic",
  "tracing",
  "tracing-subscriber",
 ]

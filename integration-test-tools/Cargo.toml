@@ -11,6 +11,5 @@ nodelib = { path = "../crates/nodelib" }
 rust_decimal = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tonic = "0.11"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }

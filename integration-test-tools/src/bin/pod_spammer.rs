@@ -2,11 +2,8 @@ use clap::Parser;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::time::Duration;
-use tonic::Request;
 
 use nodelib::etcd;
-use nodelib::etcd::pb::etcdserverpb::PutRequest;
-use nodelib::etcd::prefix;
 use nodelib::resources;
 use nodelib::resources::pod::*;
 use nodelib::util;
@@ -43,45 +40,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mem = mems[idx % mems.len()];
         tracing::info!(pod_name, cmd, ?cpu, ?mem, "create");
 
-        let pod = PodResource::new(
-            pod_name.clone(),
-            PodType::Pod,
-            PodSpec {
-                containers: vec![PodContainerSpec {
-                    name: "cmd".to_owned(),
-                    image: "docker.io/library/busybox".to_owned(),
-                    entrypoint: None,
-                    cmd: vec![cmd.to_owned()],
-                    env: HashMap::from([
-                        ("FOO".to_owned(), "1".to_owned()),
-                        ("BAR".to_owned(), "2".to_owned()),
-                    ]),
-                    ports: Vec::new(),
-                    resources: Some(ContainerResourceSpec {
-                        requests: Some(ContainerResourceSpecInner {
-                            cpu: Some(cpu),
-                            memory: Some(mem),
+        resources::create_and_schedule_pod(
+            &config.etcd,
+            PodResource::new(
+                pod_name,
+                PodType::Pod,
+                PodSpec {
+                    containers: vec![PodContainerSpec {
+                        name: "cmd".to_owned(),
+                        image: "docker.io/library/busybox".to_owned(),
+                        entrypoint: None,
+                        cmd: vec![cmd.to_owned()],
+                        env: HashMap::from([
+                            ("FOO".to_owned(), "1".to_owned()),
+                            ("BAR".to_owned(), "2".to_owned()),
+                        ]),
+                        ports: Vec::new(),
+                        resources: Some(ContainerResourceSpec {
+                            requests: Some(ContainerResourceSpecInner {
+                                cpu: Some(cpu),
+                                memory: Some(mem),
+                            }),
+                            limits: None,
                         }),
-                        limits: None,
-                    }),
-                }],
-            },
+                    }],
+                },
+            )
+            .with_state(PodState::Created),
         )
-        .with_state(PodState::Created);
-
-        let mut kv_client = config.etcd.kv_client().await?;
-        resources::create_or_replace(&config.etcd, true, pod.clone()).await?;
-        kv_client
-            .put(Request::new(PutRequest {
-                key: format!(
-                    "{prefix}{pod_name}",
-                    prefix = prefix::unscheduled_pods(&config.etcd),
-                )
-                .into(),
-                value: pod.to_json_string().into(),
-                ..Default::default()
-            }))
-            .await?;
+        .await?;
 
         idx += 1;
         tokio::time::sleep(config.delay).await;

@@ -12,7 +12,7 @@ use crate::resources::types::{GenericResource, Resource, TryFromError};
 pub type PodResource = GenericResource<PodType, PodState, PodSpec>;
 
 /// There's only one pod resource type.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PodType {
     #[serde(rename = "pod")]
     Pod,
@@ -36,7 +36,7 @@ impl FromStr for PodType {
 ///////////////////////////////////////////////////////////////////////////////
 
 /// The state of a pod resource.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PodState {
     /// Initial state

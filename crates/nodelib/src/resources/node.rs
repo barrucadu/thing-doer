@@ -12,7 +12,7 @@ use crate::resources::types::{GenericResource, Resource, TryFromError};
 pub type NodeResource = GenericResource<NodeType, NodeState, NodeSpec>;
 
 /// The type of a node.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeType {
     #[serde(rename = "node.reaper")]
     Reaper,
@@ -49,7 +49,7 @@ impl FromStr for NodeType {
 /// - !alive => dead
 ///
 /// Nevertheless, those are captured in a type, to avoid being stringly typed.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NodeState {
     Healthy,
