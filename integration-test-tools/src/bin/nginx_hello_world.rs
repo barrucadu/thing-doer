@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_state(PodState::Created);
 
     let mut kv_client = config.etcd.kv_client().await?;
-    resources::put(&config.etcd, pod.clone()).await?;
+    resources::create_or_replace(&config.etcd, true, pod.clone()).await?;
     kv_client
         .put(Request::new(PutRequest {
             key: format!(

@@ -48,9 +48,13 @@ pub async fn initialise(
         process::exit(EXIT_CODE_INITIALISE_FAILED);
     }
 
-    let resource = resources::NodeResource::new(name.clone(), node_type, node_spec)
-        .with_state(NodeState::Healthy);
-    resources::put(&etcd_config, resource).await?;
+    resources::create_or_replace(
+        &etcd_config,
+        true,
+        resources::NodeResource::new(name.clone(), node_type, node_spec)
+            .with_state(NodeState::Healthy),
+    )
+    .await?;
 
     let (healthy_lease, alive_lease) = heartbeat::establish_leases(&etcd_config, &name).await?;
     let alive_lease_id = alive_lease.id;
