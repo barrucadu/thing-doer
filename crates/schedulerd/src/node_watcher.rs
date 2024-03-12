@@ -29,9 +29,9 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
     }));
 
     let prefixes = &[
-        prefix::node_heartbeat_healthy(&etcd_config),
-        prefix::node_available_cpu(&etcd_config),
-        prefix::node_available_memory(&etcd_config),
+        prefix::node_heartbeat_healthy(&etcd_config, NodeType::Worker),
+        prefix::node_available_cpu(&etcd_config, NodeType::Worker),
+        prefix::node_available_memory(&etcd_config, NodeType::Worker),
         prefix::resource(&etcd_config, &NodeType::Worker.to_string()),
     ];
 
@@ -86,9 +86,11 @@ impl InnerState {
 
 impl watcher::Watcher for InnerState {
     async fn apply_event(&mut self, event: Event) {
-        let healthcheck_prefix = prefix::node_heartbeat_healthy(&self.etcd_config);
-        let available_cpu_prefix = prefix::node_available_cpu(&self.etcd_config);
-        let available_memory_prefix = prefix::node_available_memory(&self.etcd_config);
+        let healthcheck_prefix =
+            prefix::node_heartbeat_healthy(&self.etcd_config, NodeType::Worker);
+        let available_cpu_prefix = prefix::node_available_cpu(&self.etcd_config, NodeType::Worker);
+        let available_memory_prefix =
+            prefix::node_available_memory(&self.etcd_config, NodeType::Worker);
         let resource_prefix = prefix::resource(&self.etcd_config, &NodeType::Worker.to_string());
 
         let is_create = event.r#type() == EventType::Put;

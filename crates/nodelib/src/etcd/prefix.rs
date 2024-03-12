@@ -1,4 +1,5 @@
 use crate::etcd::config::Config;
+use crate::resources::node::NodeType;
 
 /// Prefix under which pods to schedule are written.  Keys are pod names, values
 /// are pod resources.
@@ -16,33 +17,43 @@ pub fn claimed_pods(config: &Config) -> String {
 /// names, values are pod resources.
 pub fn worker_inbox(config: &Config, worker: &str) -> String {
     format!(
-        "{prefix}/pod/worker-inbox/{worker}/",
-        prefix = config.prefix
+        "{prefix}/{node_type}/inbox/{worker}/",
+        prefix = config.prefix,
+        node_type = NodeType::Worker,
     )
 }
 
 /// Prefix under which a node's available CPU for pods is written.  Keys are
 /// node names, values are `Decimal`s.
-pub fn node_available_cpu(config: &Config) -> String {
-    format!("{prefix}/node/limits/cpu/", prefix = config.prefix)
+pub fn node_available_cpu(config: &Config, node_type: NodeType) -> String {
+    format!("{prefix}/{node_type}/limits/cpu/", prefix = config.prefix)
 }
 
 /// Prefix under which a node's available memory for pods is written.  Keys are
 /// node names, values are `u64`s.
-pub fn node_available_memory(config: &Config) -> String {
-    format!("{prefix}/node/limits/memory/", prefix = config.prefix)
+pub fn node_available_memory(config: &Config, node_type: NodeType) -> String {
+    format!(
+        "{prefix}/{node_type}/limits/memory/",
+        prefix = config.prefix
+    )
 }
 
 /// Prefix under which node "healthy" checks are written.  Keys are node names,
 /// values are arbitrary.
-pub fn node_heartbeat_healthy(config: &Config) -> String {
-    format!("{prefix}/node/heartbeat/healthy/", prefix = config.prefix)
+pub fn node_heartbeat_healthy(config: &Config, node_type: NodeType) -> String {
+    format!(
+        "{prefix}/{node_type}/heartbeat/healthy/",
+        prefix = config.prefix
+    )
 }
 
 /// Prefix under which node "alive" checks are written.  Keys are node names,
 /// values are arbitrary.
-pub fn node_heartbeat_alive(config: &Config) -> String {
-    format!("{prefix}/node/heartbeat/alive/", prefix = config.prefix)
+pub fn node_heartbeat_alive(config: &Config, node_type: NodeType) -> String {
+    format!(
+        "{prefix}/{node_type}/heartbeat/alive/",
+        prefix = config.prefix
+    )
 }
 
 /// Prefix under which resources are written.  Keys are resource names, values

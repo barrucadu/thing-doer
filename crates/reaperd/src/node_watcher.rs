@@ -11,6 +11,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
+use nodelib::resources::node::NodeType;
 
 use crate::reaper::reap_node_inbox;
 
@@ -37,7 +38,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        prefix::node_heartbeat_alive(&etcd_config),
+        prefix::node_heartbeat_alive(&etcd_config, NodeType::Worker),
     )
     .await?;
 
@@ -58,7 +59,7 @@ struct WatchState {
 
 impl watcher::Watcher for WatchState {
     async fn apply_event(&mut self, event: Event) {
-        let prefix = prefix::node_heartbeat_alive(&self.etcd_config);
+        let prefix = prefix::node_heartbeat_alive(&self.etcd_config, NodeType::Worker);
         let is_delete = event.r#type() == EventType::Delete;
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();

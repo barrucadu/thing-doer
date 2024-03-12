@@ -4,6 +4,7 @@ use crate::etcd;
 use crate::etcd::leaser;
 use crate::etcd::pb::etcdserverpb::RangeRequest;
 use crate::etcd::prefix;
+use crate::resources::node::NodeType;
 use crate::Error;
 
 /// If this time elapses without a heartbeat, this instance enters "unhealthy"
@@ -16,6 +17,7 @@ pub static ALIVE_LEASE_TTL: i64 = 300;
 /// Set up the initial health / liveness leases for a node.
 pub async fn establish_leases(
     etcd_config: &etcd::Config,
+    node_type: NodeType,
     name: &str,
 ) -> Result<(leaser::Lease, leaser::Lease), Error> {
     let healthy_lease = leaser::establish_lease(
@@ -23,7 +25,7 @@ pub async fn establish_leases(
         HEALTHY_LEASE_TTL,
         format!(
             "{prefix}{name}",
-            prefix = prefix::node_heartbeat_healthy(etcd_config)
+            prefix = prefix::node_heartbeat_healthy(etcd_config, node_type)
         ),
     )
     .await?;
@@ -33,7 +35,7 @@ pub async fn establish_leases(
         ALIVE_LEASE_TTL,
         format!(
             "{prefix}{name}",
-            prefix = prefix::node_heartbeat_alive(etcd_config)
+            prefix = prefix::node_heartbeat_alive(etcd_config, node_type)
         ),
     )
     .await?;
@@ -42,14 +44,18 @@ pub async fn establish_leases(
 }
 
 /// Check if a node is still alive.
-pub async fn is_alive(etcd_config: &etcd::Config, name: &str) -> Result<bool, Error> {
+pub async fn is_alive(
+    etcd_config: &etcd::Config,
+    node_type: NodeType,
+    name: &str,
+) -> Result<bool, Error> {
     let mut kv_client = etcd_config.kv_client().await?;
 
     let response = kv_client
         .range(Request::new(RangeRequest {
             key: format!(
                 "{prefix}{name}",
-                prefix = prefix::node_heartbeat_alive(etcd_config)
+                prefix = prefix::node_heartbeat_alive(etcd_config, node_type)
             )
             .into(),
             limit: 1,

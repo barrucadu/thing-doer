@@ -40,7 +40,7 @@ pub async fn initialise(
     let name = node_name.unwrap_or(util::random_name()).to_lowercase();
     let address = node_spec.address;
 
-    if heartbeat::is_alive(&etcd_config, &name).await? {
+    if heartbeat::is_alive(&etcd_config, node_type, &name).await? {
         tracing::error!(
             name,
             "another node with this name is still alive, terminating..."
@@ -56,7 +56,8 @@ pub async fn initialise(
     )
     .await?;
 
-    let (healthy_lease, alive_lease) = heartbeat::establish_leases(&etcd_config, &name).await?;
+    let (healthy_lease, alive_lease) =
+        heartbeat::establish_leases(&etcd_config, node_type, &name).await?;
     let alive_lease_id = alive_lease.id;
 
     let (expire_healthy_tx, expire_healthy_rx) = oneshot::channel();
@@ -76,7 +77,7 @@ pub async fn initialise(
         dns::create_leased_a_record(
             &etcd_config,
             alive_lease_id,
-            dns::Namespace::Node,
+            dns::Namespace::Node(node_type),
             &name,
             ip,
         )
@@ -88,7 +89,7 @@ pub async fn initialise(
                 Some(alive_lease_id),
                 dns::Namespace::Special,
                 alias,
-                dns::Namespace::Node,
+                dns::Namespace::Node(node_type),
                 &name,
             )
             .await?;

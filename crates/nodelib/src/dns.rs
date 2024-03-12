@@ -10,6 +10,7 @@ use crate::etcd;
 use crate::etcd::leaser::LeaseId;
 use crate::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
 use crate::etcd::prefix;
+use crate::resources::node::NodeType;
 
 /// Apex for the cluster DNS zone.
 pub static APEX: &str = "cluster.local.";
@@ -45,7 +46,7 @@ pub fn cluster_zone(worker_node_name: &str) -> Zone {
         DomainName::from_dotted_string(APEX).unwrap(),
         Some(SOA {
             mname: DomainName::from_dotted_string(&domain_name_for(
-                Namespace::Node,
+                Namespace::Node(NodeType::Worker),
                 worker_node_name,
             ))
             .unwrap(),
@@ -158,9 +159,9 @@ pub async fn delete_alias_record(
 
 /// Namespaces in which domains can live.  A domain in a namespace `foo` is a
 /// subdomain of `foo.cluster.local.`.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum Namespace {
-    Node,
+    Node(NodeType),
     Pod,
     Special,
 }
@@ -168,7 +169,9 @@ pub enum Namespace {
 impl fmt::Display for Namespace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Node => write!(f, "node"),
+            Self::Node(NodeType::Reaper) => write!(f, "reaper.node"),
+            Self::Node(NodeType::Scheduler) => write!(f, "scheduler.node"),
+            Self::Node(NodeType::Worker) => write!(f, "worker.node"),
             Self::Pod => write!(f, "pod"),
             Self::Special => write!(f, "special"),
         }

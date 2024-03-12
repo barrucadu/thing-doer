@@ -15,7 +15,8 @@ use nodelib::etcd::leaser::LeaseId;
 use nodelib::etcd::pb::etcdserverpb::request_op;
 use nodelib::etcd::pb::etcdserverpb::{PutRequest, RequestOp, TxnRequest};
 use nodelib::etcd::prefix;
-use nodelib::resources::PodResource;
+use nodelib::resources::node::NodeType;
+use nodelib::resources::pod::PodResource;
 
 /// Exit code in case the limit channel closes.
 pub static EXIT_CODE_LIMITER_FAILED: i32 = 1;
@@ -166,7 +167,7 @@ async fn try_set_resource_limits(
                     request: Some(request_op::Request::RequestPut(PutRequest {
                         key: format!(
                             "{prefix}{my_name}",
-                            prefix = prefix::node_available_cpu(etcd_config),
+                            prefix = prefix::node_available_cpu(etcd_config, NodeType::Worker),
                         )
                         .into(),
                         value: cpu.to_string().into(),
@@ -178,7 +179,7 @@ async fn try_set_resource_limits(
                     request: Some(request_op::Request::RequestPut(PutRequest {
                         key: format!(
                             "{prefix}{my_name}",
-                            prefix = prefix::node_available_memory(etcd_config),
+                            prefix = prefix::node_available_memory(etcd_config, NodeType::Worker),
                         )
                         .into(),
                         value: memory.to_string().into(),
