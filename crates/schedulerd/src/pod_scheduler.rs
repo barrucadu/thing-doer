@@ -277,11 +277,10 @@ async fn txn_check_and_schedule(
         pod_name = pod.name
     );
 
-    // not sure how to check it exists directly, so just check it exists and has
-    // lease ID 0 - i.e. no lease.
+    // create revision (ie `Create`) = 0 => the key does not exist
     let compare = vec![Compare {
-        result: compare::CompareResult::Equal.into(),
-        target: compare::CompareTarget::Lease.into(),
+        result: compare::CompareResult::NotEqual.into(),
+        target: compare::CompareTarget::Create.into(),
         key: unscheduled_pod_key.clone().into(),
         ..Default::default()
     }];
