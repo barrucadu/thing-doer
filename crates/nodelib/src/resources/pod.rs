@@ -6,7 +6,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::error::ResourceError;
-use crate::resources::types::{GenericResource, Resource, TryFromError};
+use crate::resources::types::{GenericResource, Resource};
 
 /// A resource where the spec is a pod.
 pub type PodResource = GenericResource<PodType, PodState, PodSpec>;
@@ -246,7 +246,7 @@ impl ContainerResourceSpec {
 }
 
 impl TryFrom<Resource> for PodResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(resource: Resource) -> Result<Self, Self::Error> {
         let GenericResource {
@@ -261,7 +261,7 @@ impl TryFrom<Resource> for PodResource {
         let pod_state = if let Some(s) = state {
             PodState::from_str(&s)?
         } else {
-            return Err(ResourceError::BadState.into());
+            return Err(ResourceError::BadState);
         };
 
         let value = serde_json::to_value(spec).unwrap();
@@ -278,7 +278,7 @@ impl TryFrom<Resource> for PodResource {
 }
 
 impl TryFrom<Value> for PodResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         Self::try_from(Resource::try_from(value)?)
@@ -286,7 +286,7 @@ impl TryFrom<Value> for PodResource {
 }
 
 impl TryFrom<Vec<u8>> for PodResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         Self::try_from(Resource::try_from(bytes)?)

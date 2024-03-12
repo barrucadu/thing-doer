@@ -57,15 +57,22 @@ impl From<tonic::transport::Error> for Error {
 }
 
 /// Errors specific to resource processing.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub enum ResourceError {
     BadName,
     BadType,
     BadState,
+    Deserialise(serde_json::Error),
+}
+
+impl From<serde_json::Error> for ResourceError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Deserialise(error)
+    }
 }
 
 /// Errors specific to streaming RPCs.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub enum StreamingError {
     CannotSend,
     Ended,

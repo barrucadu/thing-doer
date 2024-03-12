@@ -6,7 +6,7 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use crate::error::ResourceError;
-use crate::resources::types::{GenericResource, Resource, TryFromError};
+use crate::resources::types::{GenericResource, Resource};
 
 /// A resource where the spec is a node.
 pub type NodeResource = GenericResource<NodeType, NodeState, NodeSpec>;
@@ -97,7 +97,7 @@ pub struct NodeLimitSpec {
 }
 
 impl TryFrom<Resource> for NodeResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(resource: Resource) -> Result<Self, Self::Error> {
         let GenericResource {
@@ -112,7 +112,7 @@ impl TryFrom<Resource> for NodeResource {
         let node_state = if let Some(s) = state {
             NodeState::from_str(&s)?
         } else {
-            return Err(ResourceError::BadState.into());
+            return Err(ResourceError::BadState);
         };
 
         let value = serde_json::to_value(spec).unwrap();
@@ -129,7 +129,7 @@ impl TryFrom<Resource> for NodeResource {
 }
 
 impl TryFrom<Value> for NodeResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         Self::try_from(Resource::try_from(value)?)
@@ -137,7 +137,7 @@ impl TryFrom<Value> for NodeResource {
 }
 
 impl TryFrom<Vec<u8>> for NodeResource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         Self::try_from(Resource::try_from(bytes)?)

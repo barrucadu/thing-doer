@@ -94,26 +94,8 @@ impl<TypeT: Serialize, SpecT: Serialize, StateT: Serialize> GenericResource<Type
     }
 }
 
-#[derive(Debug)]
-pub enum TryFromError {
-    Invalid(ResourceError),
-    Serde(serde_json::Error),
-}
-
-impl From<ResourceError> for TryFromError {
-    fn from(err: ResourceError) -> Self {
-        TryFromError::Invalid(err)
-    }
-}
-
-impl From<serde_json::Error> for TryFromError {
-    fn from(err: serde_json::Error) -> Self {
-        TryFromError::Serde(err)
-    }
-}
-
 impl TryFrom<Value> for Resource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         let resource = serde_json::from_value::<Self>(value)?;
@@ -124,7 +106,7 @@ impl TryFrom<Value> for Resource {
 }
 
 impl TryFrom<Vec<u8>> for Resource {
-    type Error = TryFromError;
+    type Error = ResourceError;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         let resource = serde_json::from_slice::<Self>(&bytes)?;
