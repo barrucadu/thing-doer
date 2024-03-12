@@ -35,6 +35,7 @@ pub async fn initialise(
     node_name: Option<String>,
     node_type: NodeType,
     node_spec: NodeSpec,
+    special_alias: Option<&str>,
 ) -> Result<State, Error> {
     let name = node_name.unwrap_or(util::random_name()).to_lowercase();
     let address = node_spec.address;
@@ -76,6 +77,18 @@ pub async fn initialise(
             ip,
         )
         .await?;
+
+        if let Some(alias) = special_alias {
+            dns::append_alias_record(
+                &etcd_config,
+                Some(alive_lease_id),
+                dns::Namespace::Special,
+                alias,
+                dns::Namespace::Node,
+                &name,
+            )
+            .await?;
+        }
     }
 
     Ok(State {

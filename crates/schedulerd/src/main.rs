@@ -26,8 +26,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Args { name, etcd } = Args::parse();
     let node_state = node_watcher::initialise(etcd.clone()).await?;
 
-    let state =
-        nodelib::initialise(etcd.clone(), name, NodeType::Scheduler, NodeSpec::default()).await?;
+    let state = nodelib::initialise(
+        etcd.clone(),
+        name,
+        NodeType::Scheduler,
+        NodeSpec::default(),
+        None,
+    )
+    .await?;
 
     pod_scheduler::initialise(etcd, node_state, state.name.clone()).await?;
 

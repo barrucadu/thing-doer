@@ -3,7 +3,6 @@ use rust_decimal::Decimal;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process;
 
-use nodelib::dns;
 use nodelib::etcd;
 use nodelib::resources::node::*;
 
@@ -14,7 +13,7 @@ use workerd::pod_worker;
 use workerd::podman;
 
 /// Add an alias record for the current host to `dns.special.cluster.local.`
-pub static SPECIAL_HOSTNAME_DNS: &str = "dns";
+pub static SPECIAL_HOSTNAME: &str = "dns";
 
 /// thing-doer workerd.
 #[derive(Clone, Debug, Parser)]
@@ -85,20 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address: Some(address),
             limits: Some(NodeLimitSpec { cpu, memory }),
         },
+        Some(SPECIAL_HOSTNAME),
     )
     .await?;
 
     cluster_nameserver::initialise(etcd.clone(), &state.name, address, external_dns).await?;
-
-    nodelib::dns::append_alias_record(
-        &etcd,
-        Some(state.alive_lease_id),
-        dns::Namespace::Special,
-        SPECIAL_HOSTNAME_DNS,
-        dns::Namespace::Node,
-        &state.name,
-    )
-    .await?;
 
     let limit_tx = limits::initialise(
         etcd.clone(),
