@@ -4,8 +4,7 @@ use std::process;
 use nodelib::etcd;
 use nodelib::resources::node::*;
 
-use reaperd::node_watcher;
-use reaperd::pod_watcher;
+use reaperd::watcher;
 
 /// thing-doer reaperd.
 #[derive(Clone, Debug, Parser)]
@@ -34,8 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let reap_pod_tx = pod_watcher::initialise(etcd.clone(), state.name.clone()).await?;
-    node_watcher::initialise(etcd, reap_pod_tx).await?;
+    watcher::initialise(etcd, state.name.clone()).await?;
 
     let ch = nodelib::wait_for_sigterm(state).await;
     nodelib::signal_channel(ch).await;
