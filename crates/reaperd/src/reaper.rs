@@ -1,4 +1,4 @@
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc;
 use tonic::transport::Channel;
 use tonic::Request;
 
@@ -15,9 +15,9 @@ use nodelib::etcd::prefix;
 use nodelib::resources::pod::*;
 
 /// Mark all inboxed pods on a node as dead
-pub async fn reap_node_inbox(
+pub async fn drain_node_inbox(
     etcd_config: &etcd::Config,
-    reap_pod_tx: Sender<String>,
+    reap_pod_tx: mpsc::UnboundedSender<String>,
     node_name: &str,
 ) -> Result<bool, Error> {
     let to_reap = get_inbox_for_node(etcd_config, node_name).await?;
@@ -27,32 +27,28 @@ pub async fn reap_node_inbox(
     }
 
     let mut kv_client = etcd_config.kv_client().await?;
-    for name in to_reap {
-        tracing::info!(name, "found reapable pod");
-        let inbox_key = format!(
-            "{prefix}{name}",
-            prefix = prefix::worker_inbox(etcd_config, node_name)
-        );
-        match reap_pod_tx.try_send(name.to_owned()) {
-            Ok(_) => {
-                kv_client
-                    .delete_range(Request::new(DeleteRangeRequest {
-                        key: inbox_key.into(),
-                        ..Default::default()
-                    }))
-                    .await?;
-            }
-            Err(error) => {
-                tracing::warn!(name, ?error, "could not trigger reaper");
-            }
-        }
+    for pod_name in to_reap {
+        tracing::info!(node_name, pod_name, "found reapable pod");
+        reap_pod_tx
+            .send(pod_name.to_owned())
+            .expect("could not send to unbounded channel");
+        kv_client
+            .delete_range(Request::new(DeleteRangeRequest {
+                key: format!(
+                    "{prefix}{pod_name}",
+                    prefix = prefix::worker_inbox(etcd_config, node_name)
+                )
+                .into(),
+                ..Default::default()
+            }))
+            .await?;
     }
 
     Ok(true)
 }
 
 /// Mark a pod as dead
-pub async fn reap_pod(
+pub async fn mark_pod_as_dead(
     etcd_config: &etcd::Config,
     my_name: &str,
     pod_name: &str,

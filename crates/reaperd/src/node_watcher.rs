@@ -1,9 +1,6 @@
-use std::collections::HashSet;
-use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 
 use nodelib::error::*;
@@ -13,10 +10,7 @@ use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
 use nodelib::resources::node::NodeType;
 
-use crate::reaper::reap_node_inbox;
-
-/// Exit code in case the reaper channel closes.
-pub static EXIT_CODE_REAPER_FAILED: i32 = 1;
+use crate::reaper::drain_node_inbox;
 
 /// Interval to retry pod that could not be reaped.
 pub static RETRY_INTERVAL: u64 = 60;
@@ -24,15 +18,13 @@ pub static RETRY_INTERVAL: u64 = 60;
 /// Set up a watcher for new dead pods, and the background tasks to reap them.
 pub async fn initialise(
     etcd_config: etcd::Config,
-    reap_pod_tx: Sender<String>,
+    reap_pod_tx: mpsc::UnboundedSender<String>,
 ) -> Result<(), Error> {
-    let (reap_node_tx, reap_node_rx) = mpsc::channel(128);
+    let (reap_node_tx, reap_node_rx) = mpsc::unbounded_channel();
 
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
-        reap_node_tx,
-        reap_pod_tx,
-        unreaped_nodes: HashSet::new(),
+        reap_node_tx: reap_node_tx.clone(),
     }));
 
     watcher::setup_watcher(
@@ -42,8 +34,7 @@ pub async fn initialise(
     )
     .await?;
 
-    tokio::spawn(reap_task(state.clone(), reap_node_rx));
-    tokio::spawn(retry_task(state.clone()));
+    tokio::spawn(task(etcd_config, reap_node_rx, reap_node_tx, reap_pod_tx));
 
     Ok(())
 }
@@ -52,9 +43,7 @@ pub async fn initialise(
 #[derive(Debug)]
 struct WatchState {
     pub etcd_config: etcd::Config,
-    pub reap_node_tx: Sender<String>,
-    pub reap_pod_tx: Sender<String>,
-    pub unreaped_nodes: HashSet<String>,
+    pub reap_node_tx: mpsc::UnboundedSender<String>,
 }
 
 impl watcher::Watcher for WatchState {
@@ -64,13 +53,12 @@ impl watcher::Watcher for WatchState {
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, name)) = key.split_once(&prefix) {
+        if let Some((_, node_name)) = key.split_once(&prefix) {
             if is_delete {
-                tracing::info!(name, "found reapable node");
-                self.unreaped_nodes.insert(name.to_owned());
-                if let Err(error) = self.reap_node_tx.try_send(name.to_owned()) {
-                    tracing::warn!(name, ?error, "could not trigger reaper");
-                }
+                tracing::info!(node_name, "found reapable node");
+                self.reap_node_tx
+                    .send(node_name.to_owned())
+                    .expect("could not send to unbounded channel");
             }
         } else {
             tracing::warn!(?key, "unexpected watch key");
@@ -78,50 +66,61 @@ impl watcher::Watcher for WatchState {
     }
 }
 
-/// Background task to queue up all unreaped nodes every `RETRY_INTERVAL`
-/// seconds.
-async fn retry_task(state: Arc<RwLock<WatchState>>) {
+///////////////////////////////////////////////////////////////////////////////
+
+/// Background task to reap dead nodes.
+async fn task(
+    etcd_config: etcd::Config,
+    mut reap_node_rx: mpsc::UnboundedReceiver<String>,
+    reap_node_tx: mpsc::UnboundedSender<String>,
+    reap_pod_tx: mpsc::UnboundedSender<String>,
+) {
+    let mut to_retry = Vec::new();
     loop {
-        tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
-
-        let to_retry = {
-            let r = state.read().await;
-            r.unreaped_nodes.iter().cloned().collect::<Vec<_>>()
-        };
-
-        if !to_retry.is_empty() {
-            tracing::info!(count = ?to_retry.len(), "retrying unreaped nodes");
-            let w = state.write().await;
-            for name in to_retry {
-                tracing::info!(name, "retrying unreaped node");
-                if let Err(error) = w.reap_node_tx.try_send(name.clone()) {
-                    tracing::warn!(name, ?error, "could not trigger reaper");
+        tokio::select! {
+            msg = reap_node_rx.recv() => {
+                let node_name = msg.unwrap();
+                if !reap_node_pods(&etcd_config, &reap_pod_tx, &node_name).await {
+                    to_retry.push(node_name);
                 }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)) => {
+                enqueue_retries(to_retry, &reap_node_tx).await;
+                to_retry = Vec::new();
             }
         }
     }
 }
 
-/// Background task to reap nodes.
-async fn reap_task(state: Arc<RwLock<WatchState>>, mut reap_node_rx: Receiver<String>) {
-    while let Some(node_name) = reap_node_rx.recv().await {
-        let mut w = state.write().await;
-        tracing::info!(node_name, "got reap request");
-        match reap_node_inbox(&w.etcd_config, w.reap_pod_tx.clone(), &node_name).await {
-            Ok(true) => {
-                tracing::info!(node_name, "reaped node");
-                w.unreaped_nodes.remove(&node_name);
-            }
-            Ok(false) => {
-                tracing::info!(node_name, "node already reaped");
-                w.unreaped_nodes.remove(&node_name);
-            }
-            Err(error) => {
-                tracing::warn!(node_name, ?error, "could not reap node, retrying...");
-            }
+/// Queue up all a node's pods to reap.  Returns `false` if it needs to retry.
+async fn reap_node_pods(
+    etcd_config: &etcd::Config,
+    reap_pod_tx: &mpsc::UnboundedSender<String>,
+    node_name: &str,
+) -> bool {
+    tracing::info!(node_name, "got reap request");
+    match drain_node_inbox(etcd_config, reap_pod_tx.clone(), node_name).await {
+        Ok(true) => {
+            tracing::info!(node_name, "reaped node");
+            true
+        }
+        Ok(false) => {
+            tracing::info!(node_name, "node already reaped");
+            true
+        }
+        Err(error) => {
+            tracing::warn!(node_name, ?error, "could not reap node, retrying...");
+            false
         }
     }
+}
 
-    tracing::error!("reaper channel unexpectedly closed, termianting...");
-    process::exit(EXIT_CODE_REAPER_FAILED);
+/// Queue up all of the nodes in need of retrying.
+async fn enqueue_retries(to_retry: Vec<String>, reap_node_tx: &mpsc::UnboundedSender<String>) {
+    for node_name in to_retry.into_iter() {
+        tracing::info!(node_name, "retrying unreaped node");
+        reap_node_tx
+            .send(node_name)
+            .expect("could not send to unbounded channel");
+    }
 }
