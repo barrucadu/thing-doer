@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::Hash;
 use std::str::FromStr;
 
 use crate::error::ResourceError;
@@ -12,7 +13,7 @@ use crate::resources::types::{GenericResource, Resource};
 pub type PodResource = GenericResource<PodType, PodState, PodSpec>;
 
 /// There's only one pod resource type.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PodType {
     #[serde(rename = "pod")]
     Pod,
@@ -36,7 +37,7 @@ impl FromStr for PodType {
 ///////////////////////////////////////////////////////////////////////////////
 
 /// The state of a pod resource.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PodState {
     /// Initial state
@@ -49,6 +50,8 @@ pub enum PodState {
     Accepted,
     /// Running, not yet terminated
     Running,
+    /// Running, but not healthy
+    Unhealthy,
     /// Exited with a successful exit code
     ExitSuccess,
     /// Exited with an unsuccessful exit code
@@ -71,7 +74,9 @@ impl PodState {
             | Self::Errored
             | Self::Killed
             | Self::Dead => true,
-            Self::Created | Self::Scheduled | Self::Accepted | Self::Running => false,
+            Self::Created | Self::Scheduled | Self::Accepted | Self::Running | Self::Unhealthy => {
+                false
+            }
         }
     }
 }

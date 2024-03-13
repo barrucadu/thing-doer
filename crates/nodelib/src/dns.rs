@@ -169,6 +169,7 @@ pub enum Namespace {
 impl fmt::Display for Namespace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Node(NodeType::Api) => write!(f, "api.node"),
             Self::Node(NodeType::Reaper) => write!(f, "reaper.node"),
             Self::Node(NodeType::Scheduler) => write!(f, "scheduler.node"),
             Self::Node(NodeType::Worker) => write!(f, "worker.node"),

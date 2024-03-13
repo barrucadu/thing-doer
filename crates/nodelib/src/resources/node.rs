@@ -2,6 +2,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
+use std::hash::Hash;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -12,8 +13,10 @@ use crate::resources::types::{GenericResource, Resource};
 pub type NodeResource = GenericResource<NodeType, NodeState, NodeSpec>;
 
 /// The type of a node.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NodeType {
+    #[serde(rename = "node.api")]
+    Api,
     #[serde(rename = "node.reaper")]
     Reaper,
     #[serde(rename = "node.scheduler")]
@@ -49,7 +52,7 @@ impl FromStr for NodeType {
 /// - !alive => dead
 ///
 /// Nevertheless, those are captured in a type, to avoid being stringly typed.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NodeState {
     Healthy,

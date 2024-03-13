@@ -1,0 +1,17 @@
+[package]
+name = "apid"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.7.4"
+clap = { version = "~4.4.18", features = ["derive", "env"] }
+nodelib = { path = "../nodelib" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tonic = "0.11"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["json"] }

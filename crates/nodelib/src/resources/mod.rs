@@ -9,9 +9,10 @@ use tonic::Request;
 use crate::error::{Error, ResourceError};
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::compare;
+use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
 use crate::etcd::pb::etcdserverpb::request_op;
 use crate::etcd::pb::etcdserverpb::{
-    Compare, DeleteRangeRequest, PutRequest, RequestOp, TxnRequest,
+    Compare, DeleteRangeRequest, PutRequest, RangeRequest, RequestOp, TxnRequest,
 };
 use crate::etcd::prefix;
 
@@ -19,6 +20,77 @@ use crate::etcd::prefix;
 pub use crate::resources::node::NodeResource;
 pub use crate::resources::pod::{PodResource, PodType};
 pub use crate::resources::types::{GenericResource, Resource};
+
+/// Get a resource by name, if it exists.
+pub async fn get(
+    etcd_config: &etcd::Config,
+    rtype: &str,
+    rname: &str,
+) -> Result<Option<Resource>, Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+    let res = kv_client
+        .range(Request::new(RangeRequest {
+            key: format!(
+                "{prefix}{rname}",
+                prefix = prefix::resource(etcd_config, rtype),
+            )
+            .into(),
+            ..Default::default()
+        }))
+        .await?
+        .into_inner();
+
+    if res.kvs.is_empty() {
+        Ok(None)
+    } else {
+        let kv = res.kvs[0].clone();
+        let resource = Resource::try_from(kv.value)?;
+        Ok(Some(resource))
+    }
+}
+
+/// List all resources of the given type.
+pub async fn list(etcd_config: &etcd::Config, rtype: &str) -> Result<Vec<Resource>, Error> {
+    let mut out = Vec::new();
+
+    let mut kv_client = etcd_config.kv_client().await?;
+    let mut revision = 0;
+
+    let key_prefix = prefix::resource(etcd_config, rtype);
+    let range_end = prefix::range_end(&key_prefix);
+    let mut key = key_prefix.as_bytes().to_vec();
+
+    loop {
+        let response = kv_client
+            .range(Request::new(RangeRequest {
+                key,
+                range_end: range_end.clone(),
+                revision,
+                sort_order: SortOrder::Ascend.into(),
+                sort_target: SortTarget::Key.into(),
+                ..Default::default()
+            }))
+            .await?
+            .into_inner();
+        revision = response.header.unwrap().revision;
+
+        for kv in &response.kvs {
+            let resource = Resource::try_from(kv.clone().value)?;
+            out.push(resource);
+        }
+
+        if response.more {
+            let idx = response.kvs.len() - 1;
+            key = response.kvs[idx].key.clone();
+        } else {
+            break;
+        }
+    }
+
+    Ok(out)
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /// Persist a resource to etcd.
 ///
@@ -139,6 +211,47 @@ pub async fn create_and_schedule_pod(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/// Delete a resource.  If this is a pod it does NOT kill the pod - use
+/// `delete_and_kill_pod` for that.
+///
+/// Returns `false` if the resource does not exist.
+pub async fn delete(etcd_config: &etcd::Config, rtype: &str, rname: &str) -> Result<bool, Error> {
+    let resource_key = format!(
+        "{prefix}{rname}",
+        prefix = prefix::resource(etcd_config, rtype),
+    );
+
+    let mut kv_client = etcd_config.kv_client().await?;
+    let res = kv_client
+        .txn(Request::new(TxnRequest {
+            // create revision (ie `Create`) != 0 => the key exists
+            compare: vec![Compare {
+                result: compare::CompareResult::NotEqual.into(),
+                target: compare::CompareTarget::Create.into(),
+                key: resource_key.clone().into(),
+                ..Default::default()
+            }],
+            success: vec![RequestOp {
+                request: Some(request_op::Request::RequestDeleteRange(
+                    DeleteRangeRequest {
+                        key: resource_key.into(),
+                        ..Default::default()
+                    },
+                )),
+            }],
+            failure: Vec::new(),
+        }))
+        .await;
+
+    match res {
+        Ok(r) => Ok(r.into_inner().succeeded),
+        Err(error) => {
+            tracing::warn!(?error, rtype, rname, "could not delete resource");
+            Err(error.into())
+        }
+    }
+}
 
 /// Delete a pod resource and signal that it should be unscheduled / killed.
 ///

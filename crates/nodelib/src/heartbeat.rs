@@ -43,6 +43,30 @@ pub async fn establish_leases(
     Ok((healthy_lease, alive_lease))
 }
 
+/// Check if a node is still healthy.
+pub async fn is_healthy(
+    etcd_config: &etcd::Config,
+    node_type: NodeType,
+    name: &str,
+) -> Result<bool, Error> {
+    let mut kv_client = etcd_config.kv_client().await?;
+
+    let response = kv_client
+        .range(Request::new(RangeRequest {
+            key: format!(
+                "{prefix}{name}",
+                prefix = prefix::node_heartbeat_healthy(etcd_config, node_type)
+            )
+            .into(),
+            limit: 1,
+            ..Default::default()
+        }))
+        .await?
+        .into_inner();
+
+    Ok(response.count == 1)
+}
+
 /// Check if a node is still alive.
 pub async fn is_alive(
     etcd_config: &etcd::Config,
