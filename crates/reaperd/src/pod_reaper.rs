@@ -2,14 +2,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tonic::transport::Channel;
+use tonic::Request;
 
 use nodelib::error::*;
 use nodelib::etcd;
+use nodelib::etcd::pb::etcdserverpb::compare;
+use nodelib::etcd::pb::etcdserverpb::kv_client;
+use nodelib::etcd::pb::etcdserverpb::request_op;
+use nodelib::etcd::pb::etcdserverpb::{Compare, PutRequest, RangeRequest, RequestOp, TxnRequest};
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
-
-use crate::reaper::mark_pod_as_dead;
+use nodelib::resources::pod::{PodResource, PodState};
 
 /// Interval to retry pod that could not be reaped.
 pub static RETRY_INTERVAL: u64 = 60;
@@ -118,4 +123,90 @@ async fn enqueue_retries(to_retry: Vec<String>, reap_pod_tx: &mpsc::UnboundedSen
             .send(pod_name)
             .expect("could not send to unbounded channel");
     }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// Mark a pod as dead - if it's not in a terminal state, and nobody else has
+/// reaped it yet.
+async fn mark_pod_as_dead(
+    etcd_config: &etcd::Config,
+    my_name: &str,
+    pod_name: &str,
+) -> Result<bool, Error> {
+    let key = format!(
+        "{prefix}{pod_name}",
+        prefix = prefix::resource(etcd_config, "pod")
+    );
+
+    let mut kv_client = etcd_config.kv_client().await?;
+    let res = kv_client
+        .range(Request::new(RangeRequest {
+            key: key.clone().into(),
+            limit: 1,
+            ..Default::default()
+        }))
+        .await?
+        .into_inner();
+
+    if res.kvs.is_empty() {
+        return Ok(false);
+    }
+
+    let version = res.kvs[0].version;
+    let bytes = res.kvs[0].value.clone();
+    match PodResource::try_from(bytes) {
+        Ok(pod) => {
+            if pod.metadata.contains_key("reapedBy") || pod.state.unwrap().is_terminal() {
+                Ok(false)
+            } else {
+                txn_check_and_set(
+                    kv_client,
+                    version,
+                    pod.with_state(PodState::Dead)
+                        .with_metadata("reapedBy", my_name.to_owned())
+                        .to_put_request(etcd_config),
+                )
+                .await
+            }
+        }
+        Err(error) => {
+            tracing::error!(
+                pod_name,
+                ?error,
+                "could not parse pod resource definition, abandoning..."
+            );
+            Ok(false)
+        }
+    }
+}
+
+/// Atomically check if a resource hasn't been updated since we checked it and,
+/// if so, update it.
+async fn txn_check_and_set(
+    mut kv_client: kv_client::KvClient<Channel>,
+    version: i64,
+    req: PutRequest,
+) -> Result<bool, Error> {
+    let compare = vec![Compare {
+        result: compare::CompareResult::Equal.into(),
+        target: compare::CompareTarget::Version.into(),
+        key: req.key.clone(),
+        target_union: Some(compare::TargetUnion::Version(version)),
+        ..Default::default()
+    }];
+
+    let success = vec![RequestOp {
+        request: Some(request_op::Request::RequestPut(req)),
+    }];
+
+    let res = kv_client
+        .txn(Request::new(TxnRequest {
+            compare,
+            success,
+            failure: Vec::new(),
+        }))
+        .await?;
+
+    Ok(res.into_inner().succeeded)
 }
