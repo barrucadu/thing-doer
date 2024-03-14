@@ -8,6 +8,7 @@ use nodelib::etcd;
 use nodelib::etcd::pb::mvccpb::{event::EventType, Event};
 use nodelib::etcd::prefix;
 use nodelib::etcd::watcher;
+use nodelib::resources::pod::PodType;
 
 /// Interval to retry pods that could not be killed.
 pub static RETRY_INTERVAL: u64 = 5;
@@ -26,7 +27,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        vec![prefix::claimed_pods(&etcd_config)],
+        vec![prefix::resource(&etcd_config, &PodType::Pod.to_string())],
     )
     .await?;
 
@@ -45,12 +46,12 @@ struct WatchState {
 
 impl watcher::Watcher for WatchState {
     async fn apply_event(&mut self, event: Event) {
-        let prefix = prefix::claimed_pods(&self.etcd_config);
+        let pod_resource_prefix = prefix::resource(&self.etcd_config, &PodType::Pod.to_string());
         let is_delete = event.r#type() == EventType::Delete;
         let kv = event.kv.unwrap();
         let key = String::from_utf8(kv.key).unwrap();
 
-        if let Some((_, name)) = key.split_once(&prefix) {
+        if let Some((_, name)) = key.split_once(&pod_resource_prefix) {
             if is_delete {
                 if let Err(error) = self.kill_pod_tx.try_send(name.to_owned()) {
                     tracing::warn!(name, ?error, "could not trigger killer");
