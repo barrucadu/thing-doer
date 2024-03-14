@@ -257,8 +257,8 @@ pub async fn delete(etcd_config: &etcd::Config, rtype: &str, rname: &str) -> Res
 ///
 /// Returns `false` if the resource does not exist.
 ///
-/// TODO: can schedulerd and workerd be made to do the right thing from just the
-/// resource being deleted?
+/// TODO: can schedulerd be made to do the right thing from just the resource
+/// being deleted?
 pub async fn delete_and_kill_pod(
     etcd_config: &etcd::Config,
     pod_name: &str,
@@ -270,10 +270,6 @@ pub async fn delete_and_kill_pod(
     let unscheduled_pod_key = format!(
         "{prefix}{pod_name}",
         prefix = prefix::unscheduled_pods(etcd_config),
-    );
-    let claimed_pod_key = format!(
-        "{prefix}{pod_name}",
-        prefix = prefix::claimed_pods(etcd_config),
     );
 
     let mut kv_client = etcd_config.kv_client().await?;
@@ -299,14 +295,6 @@ pub async fn delete_and_kill_pod(
                     request: Some(request_op::Request::RequestDeleteRange(
                         DeleteRangeRequest {
                             key: unscheduled_pod_key.into(),
-                            ..Default::default()
-                        },
-                    )),
-                },
-                RequestOp {
-                    request: Some(request_op::Request::RequestDeleteRange(
-                        DeleteRangeRequest {
-                            key: claimed_pod_key.into(),
                             ..Default::default()
                         },
                     )),
