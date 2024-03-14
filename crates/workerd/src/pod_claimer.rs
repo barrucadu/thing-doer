@@ -48,7 +48,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        prefix::worker_inbox(&etcd_config, &my_name),
+        vec![prefix::worker_inbox(&etcd_config, &my_name)],
     )
     .await?;
 

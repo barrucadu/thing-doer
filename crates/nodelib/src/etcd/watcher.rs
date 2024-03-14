@@ -2,9 +2,8 @@ use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::error::*;
@@ -37,14 +36,17 @@ pub trait Watcher {
 pub async fn setup_watcher<W: Watcher + Send + Sync + 'static>(
     config: &Config,
     watcher: Arc<RwLock<W>>,
-    key_prefix: String,
+    key_prefixes: Vec<String>,
 ) -> Result<(), Error> {
-    let start_revision = scan_initial_state(config, &watcher, &key_prefix).await?;
+    let mut start_revision = 0;
+    for key_prefix in &key_prefixes {
+        start_revision = scan_initial_state(config, &watcher, key_prefix, start_revision).await?;
+    }
 
     tokio::spawn(watcher_task(
         config.clone(),
         watcher,
-        key_prefix,
+        key_prefixes,
         start_revision,
     ));
 
@@ -58,9 +60,9 @@ async fn scan_initial_state<W: Watcher>(
     config: &Config,
     watcher: &Arc<RwLock<W>>,
     key_prefix: &str,
+    mut revision: i64,
 ) -> Result<i64, Error> {
     let mut kv_client = config.kv_client().await?;
-    let mut revision = 0;
 
     let range_end = prefix::range_end(key_prefix);
     let mut key = key_prefix.as_bytes().to_vec();
@@ -106,11 +108,12 @@ async fn scan_initial_state<W: Watcher>(
 async fn watcher_task<W: Watcher + Send + Sync>(
     config: Config,
     watcher: Arc<RwLock<W>>,
-    key_prefix: String,
+    key_prefixes: Vec<String>,
     mut start_revision: i64,
 ) {
     let mut retries: u32 = 0;
-    while let Err((rev, error)) = watcher_loop(&config, &watcher, &key_prefix, start_revision).await
+    while let Err((rev, error)) =
+        watcher_loop(&config, &watcher, &key_prefixes, start_revision).await
     {
         if rev > start_revision {
             retries = 0;
@@ -142,11 +145,11 @@ async fn watcher_task<W: Watcher + Send + Sync>(
 async fn watcher_loop<W: Watcher>(
     config: &Config,
     watcher: &Arc<RwLock<W>>,
-    key_prefix: &str,
+    key_prefixes: &Vec<String>,
     start_revision: i64,
 ) -> Result<(), (i64, Error)> {
     let mut rev = start_revision;
-    let (_tx, mut response_stream) = setup_watch(config, key_prefix, start_revision)
+    let mut response_stream = setup_watch(config, key_prefixes, start_revision)
         .await
         .map_err(|e| (rev, e))?;
 
@@ -171,29 +174,30 @@ async fn watcher_loop<W: Watcher>(
 /// Set up a watch for a key prefix
 async fn setup_watch(
     config: &Config,
-    key_prefix: &str,
+    key_prefixes: &Vec<String>,
     start_revision: i64,
-) -> Result<(Sender<WatchRequest>, Streaming<WatchResponse>), Error> {
+) -> Result<Streaming<WatchResponse>, Error> {
     let mut watch_client = config.watch_client().await?;
 
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::unbounded_channel();
 
-    tracing::info!(key_prefix, "establishing watch");
-    tx.send(WatchRequest {
-        request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
-            key: key_prefix.into(),
-            range_end: prefix::range_end(key_prefix),
-            start_revision,
-            ..Default::default()
-        })),
-    })
-    .await
-    .map_err(|_| Error::Streaming(StreamingError::CannotSend))?;
+    for key_prefix in key_prefixes {
+        tracing::info!(key_prefix, "establishing watch");
+        tx.send(WatchRequest {
+            request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
+                key: key_prefix.clone().into(),
+                range_end: prefix::range_end(key_prefix),
+                start_revision,
+                ..Default::default()
+            })),
+        })
+        .expect("could not send to unbounded channel");
+    }
 
     let response_stream = watch_client
-        .watch(Request::new(ReceiverStream::new(rx)))
+        .watch(Request::new(UnboundedReceiverStream::new(rx)))
         .await?
         .into_inner();
 
-    Ok((tx, response_stream))
+    Ok(response_stream)
 }

@@ -31,7 +31,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        prefix::node_heartbeat_alive(&etcd_config, NodeType::Worker),
+        vec![prefix::node_heartbeat_alive(&etcd_config, NodeType::Worker)],
     )
     .await?;
 
