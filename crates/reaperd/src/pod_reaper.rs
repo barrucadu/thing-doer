@@ -43,7 +43,7 @@ pub async fn initialise(
     Ok(reap_pod_tx)
 }
 
-/// State to reap nodes.
+/// State to reap pods.
 #[derive(Debug)]
 struct WatchState {
     pub etcd_config: etcd::Config,
