@@ -52,7 +52,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        prefix::unscheduled_pods(&etcd_config),
+        vec![prefix::unscheduled_pods(&etcd_config)],
     )
     .await?;
 

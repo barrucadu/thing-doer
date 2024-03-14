@@ -65,7 +65,7 @@ pub async fn initialise(
     watcher::setup_watcher(
         &etcd_config,
         state.clone(),
-        prefix::domain_name(&etcd_config),
+        vec![prefix::domain_name(&etcd_config)],
     )
     .await?;
 

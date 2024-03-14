@@ -28,16 +28,17 @@ pub async fn initialise(etcd_config: etcd::Config) -> Result<State, Error> {
         node_available_memory: HashMap::new(),
     }));
 
-    let prefixes = &[
-        prefix::node_heartbeat_healthy(&etcd_config, NodeType::Worker),
-        prefix::node_available_cpu(&etcd_config, NodeType::Worker),
-        prefix::node_available_memory(&etcd_config, NodeType::Worker),
-        prefix::resource(&etcd_config, &NodeType::Worker.to_string()),
-    ];
-
-    for prefix in prefixes {
-        watcher::setup_watcher(&etcd_config, inner.clone(), prefix.clone()).await?;
-    }
+    watcher::setup_watcher(
+        &etcd_config,
+        inner.clone(),
+        vec![
+            prefix::node_heartbeat_healthy(&etcd_config, NodeType::Worker),
+            prefix::node_available_cpu(&etcd_config, NodeType::Worker),
+            prefix::node_available_memory(&etcd_config, NodeType::Worker),
+            prefix::resource(&etcd_config, &NodeType::Worker.to_string()),
+        ],
+    )
+    .await?;
 
     Ok(State(inner))
 }
