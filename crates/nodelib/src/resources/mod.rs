@@ -159,7 +159,7 @@ pub async fn create_or_replace<
 /// `PodState::Created`.
 ///
 /// TODO: can schedulerd be made to do the right thing from just the resource
-/// being deleted?
+/// being created?
 pub async fn create_and_schedule_pod(
     etcd_config: &etcd::Config,
     resource: PodResource,
