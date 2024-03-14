@@ -1,3 +1,2 @@
-pub mod node_watcher;
-pub mod pod_watcher;
-pub mod reaper;
+pub mod node_reaper;
+pub mod pod_reaper;
