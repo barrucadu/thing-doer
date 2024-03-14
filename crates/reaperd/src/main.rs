@@ -1,11 +1,13 @@
 use clap::Parser;
 use std::process;
+use tokio::sync::mpsc;
 
 use nodelib::etcd;
 use nodelib::resources::node::*;
 
 use reaperd::node_reaper;
 use reaperd::pod_reaper;
+use reaperd::watcher;
 
 /// thing-doer reaperd.
 #[derive(Clone, Debug, Parser)]
@@ -34,8 +36,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let reap_pod_tx = pod_reaper::initialise(etcd.clone(), state.name.clone()).await?;
-    node_reaper::initialise(etcd, reap_pod_tx).await?;
+    let (reap_node_tx, reap_node_rx) = mpsc::unbounded_channel();
+    let (reap_pod_tx, reap_pod_rx) = mpsc::unbounded_channel();
+    tokio::spawn(node_reaper::task(
+        etcd.clone(),
+        reap_node_tx.clone(),
+        reap_node_rx,
+        reap_pod_tx.clone(),
+    ));
+    tokio::spawn(pod_reaper::task(
+        etcd.clone(),
+        state.name.clone(),
+        reap_pod_tx.clone(),
+        reap_pod_rx,
+    ));
+    watcher::initialise(etcd, reap_node_tx, reap_pod_tx).await?;
 
     let ch = nodelib::wait_for_sigterm(state).await;
     nodelib::signal_channel(ch).await;
