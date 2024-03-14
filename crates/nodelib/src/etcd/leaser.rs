@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::error::*;
@@ -162,7 +162,7 @@ async fn task_loop<T>(
         let wait = Duration::from_secs((response.ttl / 3) as u64);
         tokio::select! {
             _ = tokio::time::sleep(wait) => {
-                send_ping(&tx, lease).await.map_err(|e| (successes, e))?;
+                send_ping(&tx, lease).await;
             }
             msg = &mut expire_rx => {
                 return Ok(msg.unwrap());
@@ -177,18 +177,18 @@ async fn setup_heartbeat(
     lease: &Lease,
 ) -> Result<
     (
-        mpsc::Sender<LeaseKeepAliveRequest>,
+        mpsc::UnboundedSender<LeaseKeepAliveRequest>,
         Streaming<LeaseKeepAliveResponse>,
     ),
     Error,
 > {
     let mut lease_client = config.lease_client().await?;
 
-    let (tx, rx) = mpsc::channel(16);
-    send_ping(&tx, lease).await?;
+    let (tx, rx) = mpsc::unbounded_channel();
+    send_ping(&tx, lease).await;
 
     let response_stream = lease_client
-        .lease_keep_alive(Request::new(ReceiverStream::new(rx)))
+        .lease_keep_alive(Request::new(UnboundedReceiverStream::new(rx)))
         .await?
         .into_inner();
 
@@ -196,11 +196,10 @@ async fn setup_heartbeat(
 }
 
 /// Send a ping
-async fn send_ping(tx: &mpsc::Sender<LeaseKeepAliveRequest>, lease: &Lease) -> Result<(), Error> {
+async fn send_ping(tx: &mpsc::UnboundedSender<LeaseKeepAliveRequest>, lease: &Lease) {
     tracing::info!(lease_key = lease.key, lease_id = lease.id.0, "ping");
     tx.send(LeaseKeepAliveRequest { id: lease.id.0 })
-        .await
-        .map_err(|_| Error::Streaming(StreamingError::CannotSend))
+        .expect("could not send to unbounded channel");
 }
 
 /// Wait for the pong
