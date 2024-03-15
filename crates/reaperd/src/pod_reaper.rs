@@ -24,6 +24,16 @@ pub async fn task(
     reap_pod_tx: mpsc::UnboundedSender<PodName>,
     mut reap_pod_rx: mpsc::UnboundedReceiver<PodName>,
 ) {
+    let (retry_tx, mut retry_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
+            retry_tx
+                .send(())
+                .expect("could not write to unbounded channel");
+        }
+    });
+
     let mut to_retry = Vec::new();
     loop {
         tokio::select! {
@@ -33,7 +43,7 @@ pub async fn task(
                     to_retry.push(name);
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)) => {
+            _ = retry_rx.recv() => {
                 enqueue_retries(to_retry, &reap_pod_tx).await;
                 to_retry = Vec::new();
             }
