@@ -11,17 +11,23 @@ In this guide, "host" refers to a machine that runs `apid` or `workerd` (or both
 - UDP port 8472 is open in the firewall of every host.
 ```
 
-There are two requirements for cluster container networking:
+```admonish danger title="Needs Improvement"
+Binding `apid` and `workerd` to the gateway address of the podman bridge
+network is kind of a hack, and means you can't run `apid` on hosts that aren't
+also running podman.
+```
+
+There are thre requirements for cluster container networking:
 
 1. Every container in the cluster has an IP address that is reachable from each
    other container in the cluster, regardless of which physical hosts those
    containers are running on.
 
-2. Every apid instance is able to listen on an address that is reachable from
-   each pod in the cluster.
+2. Every `apid` instance is able to listen on an address that is reachable from
+   every pod.
 
-3. Every workerd instance is able to listen on an address that is reachable from
-   each pod in the cluster.
+3. Every `workerd` instance is able to listen on an address that is reachable
+   from every pod.
 
 We're going to achieve this with [flannel][], a software-defined networking tool
 that maps a larger private address space onto a smaller number of physical
@@ -35,28 +41,66 @@ Additionally, `api.special.cluster.local` should resolve to all API nodes and
 `dns.special.cluster.local` to all worker nodes.
 
 
-## 0. Store the flannel configuration in etcd
+## Configure flannel
 
-This assigns the network `10.5.0.0/16` to flannel:
+Pick a subnet which doesn't overlap with your out-of-cluster network and write
+the flannel network configuration to etcd.
+
+For example, this assigns the network `10.5.0.0/16` to flannel:
 
 ```bash
 ETCDCTL_API=3 etcdctl put /coreos.com/network/config '{ "Network": "10.5.0.0/16", "Backend": {"Type": "vxlan"}}'
 ```
 
-Pick a subnet that doesn't overlap with your out-of-cluster network.
-
-
-## 1. Configure flannel and podman (each host)
-
-```admonish danger title="Needs Improvement"
-Manually editing config files is error-prone, this should be scripted.
-```
-
-Install and run flannel:
+Then, on each host, install and run flannel:
 
 ```bash
 sudo flannel
 ```
+
+The flannel process will automatically claim a subnet of the overall network
+space, and add the appropriate routes to the host's network configuration.
+
+
+## Configure podman (automated)
+
+Install `jq` and run the provided script:
+
+```bash
+sudo ./tools/configure-podman-network.sh
+```
+
+It will print out the network configuration and the commands to start `apid` and
+`workerd`, for example:
+
+```
+flannel network: 10.5.0.0/16
+flannel subnet:  10.5.38.1/24
+flannel gateway: 10.5.38.1
+flannel mtu:     1450
+
+sudo apid --cluster-address=10.5.38.1
+sudo workerd --cluster-address=10.5.38.1 --podman-bridge-network=flannel
+```
+
+Run those commands in separate terminals.
+
+`apid` will start an HTTP server on port 80 TCP to serve the cluster.  If you
+want it to also be available on a different, out-of-cluster, address, see the
+`--external-address` argument.
+
+`workerd` will start a DNS server on ports 53 UDP and TCP to serve DNS to its
+pods, and to the cluster more generally if needed.
+
+Now you have a working host!
+
+
+## Configure podman (manual)
+
+You can also manually configure the network.  This section explains all the
+steps involved, and may be a useful guide to understanding the script.
+
+### Create the podman network
 
 Check the generated configuration for the flannel network
 
@@ -91,8 +135,7 @@ gateway (the gateway is `10.5.72.1` in this example):
 sudo nano /etc/containers/networks/flannel.json
 ```
 
-
-## 2. Bring up the podman bridge network (each host)
+### Bring up the network interface
 
 The `podman_flannel` bridge network interface won't get created until the first
 container using it starts, so create a pod:
@@ -113,41 +156,34 @@ Finally, start it:
 sudo podman start $INFRA_CONTAINER_ID
 ```
 
-
-## 3. Configure apid and workerd (each host)
-
-```admonish danger title="Needs Improvement"
-Binding `apid` and `workerd` to the gateway address of the podman bridge
-network is kind of a hack, and means you can't run `apid` on hosts that aren't
-also running podman.
-```
+### Start apid and workerd
 
 Both `apid` and `workerd` will listen on the flannel gateway IP (`10.5.72.1` in
 the running example).
 
-### apid
+#### apid
 
 Pass the flannel gateway IP to the `apid` command:
 
 ```bash
-sudo apid --cluster-address=$GATEWAY_ADDRESS
+sudo apid --cluster-address=$FLANNEL_GATEWAY
 ```
 
-The API server will attempt to bind to port 80 TCP on the given IP to serve the
-cluster.  If you want the API server to also be available on a different,
-out-of-cluster, address, see the `--external-address` argument.
+`apid` will start an HTTP server on port 80 TCP to serve the cluster.  If you
+want it to also be available on a different, out-of-cluster, address, see the
+`--external-address` argument.
 
-### workerd
+#### workerd
 
 Pass the flannel gateway IP and the podman network name to the `workerd`
 command:
 
 ```bash
-sudo workerd --cluster-address=$GATEWAY_ADDRESS --podman-bridge-network=flannel
+sudo workerd --cluster-address=$FLANNEL_GATEWAY --podman-bridge-network=flannel
 ```
 
-The DNS server will attempt to bind to port 53 UDP and TCP on the given IP to serve
-DNS to its pods, and to the cluster more generally if needed.
+`workerd` will start a DNS server on ports 53 UDP and TCP to serve DNS to its
+pods, and to the cluster more generally if needed.
 
 
 ## Troubleshooting
@@ -157,7 +193,7 @@ podman network and confirming that it can resolve both local and external domain
 names:
 
 ```
-$ podman run -it --rm --network=flannel --dns=$GATEWAY_ADDRESS ubuntu
+$ podman run -it --rm --network=flannel --dns=$FLANNEL_GATEWAY ubuntu
 # apt-get update -y
 # apt-get install -y dnsutils
 # dig $NAME.node.cluster.local
