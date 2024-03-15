@@ -4,7 +4,6 @@ use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tonic::Request;
 
@@ -39,7 +38,7 @@ pub async fn initialise(
     node_state: node_watcher::State,
     my_name: String,
 ) -> Result<(), Error> {
-    let (new_pod_tx, new_pod_rx) = mpsc::channel(128);
+    let (new_pod_tx, new_pod_rx) = mpsc::unbounded_channel();
 
     let state = Arc::new(RwLock::new(WatchState {
         etcd_config: etcd_config.clone(),
@@ -69,7 +68,7 @@ struct WatchState {
     pub etcd_config: etcd::Config,
     pub node_state: node_watcher::State,
     pub unscheduled_pods: HashMap<String, (u64, PodResource)>,
-    pub new_pod_tx: Sender<String>,
+    pub new_pod_tx: mpsc::UnboundedSender<String>,
 }
 
 impl watcher::Watcher for WatchState {
@@ -85,9 +84,9 @@ impl watcher::Watcher for WatchState {
                     Ok(resource) => {
                         tracing::info!(name, "found new pod");
                         self.unscheduled_pods.insert(name.to_owned(), (0, resource));
-                        if let Err(error) = self.new_pod_tx.try_send(name.to_owned()) {
-                            tracing::warn!(name, ?error, "could not trigger scheduler");
-                        }
+                        self.new_pod_tx
+                            .send(name.to_owned())
+                            .expect("could not send to unbounded stream");
                     }
                     Err(error) => {
                         tracing::warn!(?key, ?error, "could not parse pod definition");
@@ -108,26 +107,21 @@ async fn retry_task(state: Arc<RwLock<WatchState>>) {
     loop {
         tokio::time::sleep(Duration::from_secs(RETRY_INTERVAL)).await;
 
-        let pods_to_retry = {
-            let r = state.read().await;
-            r.unscheduled_pods.keys().cloned().collect::<Vec<_>>()
-        };
-
-        if !pods_to_retry.is_empty() {
-            tracing::info!(count = ?pods_to_retry.len(), "retrying unscheduled pods");
-            let w = state.write().await;
-            for name in pods_to_retry {
-                tracing::info!(name, "retrying unscheduled pod");
-                if let Err(error) = w.new_pod_tx.try_send(name.clone()) {
-                    tracing::warn!(name, ?error, "could not trigger scheduler");
-                }
-            }
+        let r = state.read().await;
+        for name in r.unscheduled_pods.keys() {
+            tracing::info!(name, "retrying unscheduled pod");
+            r.new_pod_tx
+                .send(name.clone())
+                .expect("could not send to unbounded stream");
         }
     }
 }
 
 /// Background task to schedule pods.
-async fn schedule_task(state: Arc<RwLock<WatchState>>, mut new_pod_rx: Receiver<String>) {
+async fn schedule_task(
+    state: Arc<RwLock<WatchState>>,
+    mut new_pod_rx: mpsc::UnboundedReceiver<String>,
+) {
     while let Some(pod_name) = new_pod_rx.recv().await {
         let mut w = state.write().await;
         if let Some((retries, resource)) = w.unscheduled_pods.remove(&pod_name) {

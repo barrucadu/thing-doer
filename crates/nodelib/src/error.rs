@@ -74,7 +74,6 @@ impl From<serde_json::Error> for ResourceError {
 /// Errors specific to streaming RPCs.
 #[derive(Debug)]
 pub enum StreamingError {
-    CannotSend,
     Ended,
     TimedOut,
 }

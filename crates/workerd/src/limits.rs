@@ -5,7 +5,6 @@ use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tonic::Request;
 
@@ -46,7 +45,7 @@ pub async fn initialise(
     max_cpu: Decimal,
     max_memory: u64,
 ) -> Result<State, Error> {
-    let (tx, rx) = mpsc::channel(128);
+    let (tx, rx) = mpsc::unbounded_channel();
 
     try_set_resource_limits(&etcd_config, &my_name, lease_id, max_cpu, max_memory).await?;
 
@@ -98,7 +97,9 @@ impl State {
             };
             w.available_cpu -= committed.cpu;
             w.available_memory -= committed.memory;
-            let _ = w.update.try_send(());
+            w.update
+                .send(())
+                .expect("could not send to unbounded channel");
             Some(committed)
         } else {
             None
@@ -110,7 +111,9 @@ impl State {
         let mut w = self.0.write().await;
         w.available_cpu += claim.cpu;
         w.available_memory += claim.memory;
-        let _ = w.update.try_send(());
+        w.update
+            .send(())
+            .expect("could not send to unbounded channel")
     }
 }
 
@@ -119,7 +122,7 @@ impl State {
 struct InnerState {
     pub available_cpu: Decimal,
     pub available_memory: u64,
-    pub update: Sender<()>,
+    pub update: mpsc::UnboundedSender<()>,
 }
 
 /// Background task to update the limit keys.
@@ -128,7 +131,7 @@ async fn update_task(
     my_name: String,
     lease_id: LeaseId,
     inner: Arc<RwLock<InnerState>>,
-    mut rx: Receiver<()>,
+    mut rx: mpsc::UnboundedReceiver<()>,
 ) {
     while let Some(()) = rx.recv().await {
         let (cpu, memory) = {

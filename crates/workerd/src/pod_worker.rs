@@ -4,7 +4,6 @@ use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tonic::Request;
@@ -33,10 +32,17 @@ pub async fn initialise(
     my_ip: Ipv4Addr,
     lease_id: LeaseId,
     limit_state: limits::State,
-) -> Result<(Handle, Sender<PodResource>, Sender<String>), Error> {
+) -> Result<
+    (
+        Handle,
+        mpsc::UnboundedSender<PodResource>,
+        mpsc::UnboundedSender<String>,
+    ),
+    Error,
+> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let (work_pod_tx, work_pod_rx) = mpsc::channel(128);
-    let (kill_pod_tx, kill_pod_rx) = mpsc::channel(128);
+    let (work_pod_tx, work_pod_rx) = mpsc::unbounded_channel();
+    let (kill_pod_tx, kill_pod_rx) = mpsc::unbounded_channel();
 
     let prc = PodRunConfig {
         etcd: etcd_config,
@@ -86,8 +92,8 @@ async fn work_task(
     prc: PodRunConfig,
     limit_state: limits::State,
     mut shutdown_rx: oneshot::Receiver<oneshot::Sender<()>>,
-    mut work_pod_rx: Receiver<PodResource>,
-    mut kill_pod_rx: Receiver<String>,
+    mut work_pod_rx: mpsc::UnboundedReceiver<PodResource>,
+    mut kill_pod_rx: mpsc::UnboundedReceiver<String>,
 ) {
     let running_pods = Arc::new(RwLock::new(HashMap::new()));
 

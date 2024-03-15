@@ -224,7 +224,7 @@ async fn listen_task(
 ) {
     // The write end of a UdpSocket can't be cloned, so this channel hack is
     // needed.
-    let (tx, mut rx) = mpsc::channel(128);
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mut buf = vec![0u8; 512];
 
     loop {
@@ -236,9 +236,7 @@ async fn listen_task(
                 let tx_clone = tx.clone();
                 tokio::spawn(async move {
                     if let Some(message) = handle_raw_message(forward_address, cache_clone, state_clone, bytes.as_ref()).await {
-                        if let Err(error) = tx_clone.send((message, peer)).await {
-                            tracing::debug!(?peer, ?error, "could not send UDP DNS response");
-                        }
+                        tx_clone.send((message, peer)).expect("could not send to unbounded channel");
                     }
                 });
             }
