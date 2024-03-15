@@ -1,3 +1,5 @@
+#![allow(clippy::pedantic)]
+
 pub mod authpb {
     tonic::include_proto!("authpb");
 }

@@ -25,21 +25,18 @@ use crate::podman;
 pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
 
 /// Start background tasks to work pods.
-pub async fn initialise(
+pub fn initialise(
     etcd_config: etcd::Config,
     podman_config: podman::Config,
     my_name: String,
     my_ip: Ipv4Addr,
     lease_id: LeaseId,
     limit_state: limits::State,
-) -> Result<
-    (
-        Handle,
-        mpsc::UnboundedSender<PodResource>,
-        mpsc::UnboundedSender<String>,
-    ),
-    Error,
-> {
+) -> (
+    Handle,
+    mpsc::UnboundedSender<PodResource>,
+    mpsc::UnboundedSender<String>,
+) {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (work_pod_tx, work_pod_rx) = mpsc::unbounded_channel();
     let (kill_pod_tx, kill_pod_rx) = mpsc::unbounded_channel();
@@ -60,7 +57,7 @@ pub async fn initialise(
         kill_pod_rx,
     ));
 
-    Ok((Handle { shutdown_tx }, work_pod_tx, kill_pod_tx))
+    (Handle { shutdown_tx }, work_pod_tx, kill_pod_tx)
 }
 
 /// To signal that the claimer should stop claiming things.

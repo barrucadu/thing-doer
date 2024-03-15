@@ -135,7 +135,7 @@ async fn schedule_task(
                         "could not schedule pod, retrying without penalty..."
                     );
                     w.unscheduled_pods
-                        .insert(pod_name.to_owned(), (retries, resource));
+                        .insert(pod_name.clone(), (retries, resource));
                 }
                 ScheduleResult::RetryWithPenalty => {
                     if retries == MAXIMUM_RETRIES {
@@ -155,7 +155,7 @@ async fn schedule_task(
                             "could not schedule pod, retrying with penalty..."
                         );
                         w.unscheduled_pods
-                            .insert(pod_name.to_owned(), (retries + 1, resource.clone()));
+                            .insert(pod_name.clone(), (retries + 1, resource.clone()));
                     }
                 }
             }
@@ -191,7 +191,7 @@ async fn schedule_pod(state: &mut WatchState, pod: PodResource) -> ScheduleResul
         return ScheduleResult::RetryWithoutPenalty;
     }
 
-    if let Some(worker_name) = choose_worker_for_pod(workers, &pod).await {
+    if let Some(worker_name) = choose_worker_for_pod(&workers, &pod) {
         match apply_pod_schedule(&state.etcd_config, &state.my_name, &worker_name, pod).await {
             Ok(true) => {
                 tracing::info!(pod_name, worker_name, "scheduled pod to worker");
@@ -212,13 +212,13 @@ async fn schedule_pod(state: &mut WatchState, pod: PodResource) -> ScheduleResul
 }
 
 /// Schedule the pod to an arbitrary worker.
-async fn choose_worker_for_pod(
-    workers: HashMap<String, node_watcher::NodeState>,
+fn choose_worker_for_pod(
+    workers: &HashMap<String, node_watcher::NodeState>,
     pod: &PodResource,
 ) -> Option<String> {
     let limits = pod.spec.aggregate_resources();
     let mut candidates = Vec::with_capacity(workers.len());
-    for (name, node) in workers.iter() {
+    for (name, node) in workers {
         if limits.cpu_ok(node.available_cpu) && limits.memory_ok(node.available_memory) {
             candidates.push(name.to_owned());
         }

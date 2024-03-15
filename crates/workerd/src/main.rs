@@ -106,8 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         address,
         state.alive_lease_id,
         limit_tx,
-    )
-    .await?;
+    );
     let pc_handle = pod_claimer::initialise(
         etcd.clone(),
         state.name.clone(),

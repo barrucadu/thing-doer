@@ -6,7 +6,7 @@ use tokio::time::timeout;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
-use crate::error::*;
+use crate::error::{Error, StreamingError};
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::{
     LeaseGrantRequest, LeaseKeepAliveRequest, LeaseKeepAliveResponse, LeaseRevokeRequest,
@@ -145,6 +145,7 @@ pub async fn establish_lease(config: &Config, ttl: i64, key: String) -> Result<L
 ///
 /// If this returns an error, `task` attempts to re-establish the connection to
 /// etcd and calls `task_loop` again.
+#[allow(clippy::cast_sign_loss)]
 async fn task_loop<T>(
     config: &Config,
     mut expire_rx: &mut oneshot::Receiver<T>,
@@ -161,8 +162,8 @@ async fn task_loop<T>(
 
         let wait = Duration::from_secs((response.ttl / 3) as u64);
         tokio::select! {
-            _ = tokio::time::sleep(wait) => {
-                send_ping(&tx, lease).await;
+            () = tokio::time::sleep(wait) => {
+                send_ping(&tx, lease);
             }
             msg = &mut expire_rx => {
                 return Ok(msg.unwrap());
@@ -185,7 +186,7 @@ async fn setup_heartbeat(
     let mut lease_client = config.lease_client().await?;
 
     let (tx, rx) = mpsc::unbounded_channel();
-    send_ping(&tx, lease).await;
+    send_ping(&tx, lease);
 
     let response_stream = lease_client
         .lease_keep_alive(Request::new(UnboundedReceiverStream::new(rx)))
@@ -196,7 +197,7 @@ async fn setup_heartbeat(
 }
 
 /// Send a ping
-async fn send_ping(tx: &mpsc::UnboundedSender<LeaseKeepAliveRequest>, lease: &Lease) {
+fn send_ping(tx: &mpsc::UnboundedSender<LeaseKeepAliveRequest>, lease: &Lease) {
     tracing::info!(lease_key = lease.key, lease_id = lease.id.0, "ping");
     tx.send(LeaseKeepAliveRequest { id: lease.id.0 })
         .expect("could not send to unbounded channel");

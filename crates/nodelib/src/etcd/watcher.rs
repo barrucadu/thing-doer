@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
-use crate::error::*;
+use crate::error::{Error, StreamingError};
 use crate::etcd::config::Config;
 use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
 use crate::etcd::pb::etcdserverpb::watch_request::RequestUnion;

@@ -149,7 +149,7 @@ async fn claim_task(
                 }
                 Err(error) => {
                     tracing::warn!(pod_name, ?error, "could not claim pod, retrying...");
-                    w.unclaimed_pods.insert(pod_name.to_owned(), resource);
+                    w.unclaimed_pods.insert(pod_name.clone(), resource);
                 }
             }
         } else {

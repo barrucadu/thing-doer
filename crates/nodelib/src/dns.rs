@@ -5,7 +5,7 @@ use tonic::Request;
 use dns_types::protocol::types::DomainName;
 use dns_types::zones::types::{Zone, SOA};
 
-use crate::error::*;
+use crate::error::Error;
 use crate::etcd;
 use crate::etcd::leaser::LeaseId;
 use crate::etcd::pb::etcdserverpb::{DeleteRangeRequest, PutRequest};
@@ -159,7 +159,7 @@ pub async fn delete_alias_record(
 
 /// Namespaces in which domains can live.  A domain in a namespace `foo` is a
 /// subdomain of `foo.cluster.local.`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Namespace {
     Node(NodeType),
     Pod,
