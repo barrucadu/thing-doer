@@ -113,7 +113,7 @@ impl State {
         w.available_memory += claim.memory;
         w.update
             .send(())
-            .expect("could not send to unbounded channel")
+            .expect("could not send to unbounded channel");
     }
 }
 

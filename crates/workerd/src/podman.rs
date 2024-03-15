@@ -186,13 +186,13 @@ pub async fn wait_for_containers(
     loop {
         if let Some(all_ok) = container_status(config, &pod_state.name).await? {
             return Ok(WFC::Terminated(all_ok));
-        } else {
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)) => (),
-                ch = &mut kill_rx => {
-                    let _ = terminate_pod(config, pod_state).await;
-                    return Ok(WFC::Signal(ch.unwrap()));
-                }
+        }
+
+        tokio::select! {
+            () = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)) => (),
+            ch = &mut kill_rx => {
+                let _ = terminate_pod(config, pod_state).await;
+                return Ok(WFC::Signal(ch.unwrap()));
             }
         }
     }

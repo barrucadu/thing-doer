@@ -40,7 +40,7 @@ pub async fn task(
                 }
             }
             _ = retry_rx.recv() => {
-                enqueue_retries(to_retry, &reap_node_tx).await;
+                enqueue_retries(to_retry, &reap_node_tx);
                 to_retry = Vec::new();
             }
         }
@@ -75,8 +75,8 @@ async fn reap_node_pods(
 }
 
 /// Queue up all of the nodes in need of retrying.
-async fn enqueue_retries(to_retry: Vec<NodeName>, reap_node_tx: &mpsc::UnboundedSender<NodeName>) {
-    for node_name in to_retry.into_iter() {
+fn enqueue_retries(to_retry: Vec<NodeName>, reap_node_tx: &mpsc::UnboundedSender<NodeName>) {
+    for node_name in to_retry {
         tracing::info!(node_name = node_name.0, "retrying unreaped node");
         reap_node_tx
             .send(node_name)

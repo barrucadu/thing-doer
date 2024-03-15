@@ -125,7 +125,7 @@ async fn patch_resource(
         .into_response()
     } else {
         match resources::get(&etcd_config, &rtype, &rname).await {
-            Ok(Some(old_resource)) => match apply_patch(old_resource, payload) {
+            Ok(Some(old_resource)) => match apply_patch(&old_resource, payload) {
                 Ok(new_resource) => {
                     match resources::create_or_replace(&etcd_config, true, new_resource.clone())
                         .await
@@ -260,7 +260,7 @@ impl ProblemDetail {
 /// Apply a patch to a resource.
 ///
 /// TODO: implement some sort of deep merge
-fn apply_patch(old: Resource, mut new: Value) -> Result<Resource, ResourceError> {
+fn apply_patch(old: &Resource, mut new: Value) -> Result<Resource, ResourceError> {
     new["name"] = serde_json::json!(old.name);
     new["type"] = serde_json::json!(old.rtype);
 
@@ -283,7 +283,7 @@ async fn fix_node_and_pod_states(
     mut resources: Vec<Resource>,
 ) -> Result<Vec<Resource>, Error> {
     let mut node_states = HashMap::new();
-    for resource in resources.iter_mut() {
+    for resource in &mut resources {
         if is_node_type(&resource.rtype) {
             let node_type = NodeType::from_str(&resource.rtype).unwrap();
             let node_state =

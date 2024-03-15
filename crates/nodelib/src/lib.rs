@@ -1,3 +1,9 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+
 pub mod dns;
 pub mod error;
 pub mod etcd;
@@ -9,9 +15,9 @@ use std::process;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 
-use crate::error::*;
+use crate::error::Error;
 use crate::etcd::leaser;
-use crate::resources::node::*;
+use crate::resources::node::{NodeSpec, NodeState, NodeType};
 
 /// Exit code in case the initialisation process failed.
 pub static EXIT_CODE_INITIALISE_FAILED: i32 = 1;

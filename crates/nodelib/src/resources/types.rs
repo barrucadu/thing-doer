@@ -42,12 +42,14 @@ impl<TypeT: Serialize, SpecT: Serialize, StateT: Serialize> GenericResource<Type
     }
 
     /// Set the state, overwriting any existing value.
+    #[must_use]
     pub fn with_state(mut self, state: StateT) -> Self {
         self.state = Some(state);
         self
     }
 
     /// Set a metadata key, overwriting any existing value.
+    #[must_use]
     pub fn with_metadata(mut self, key: &str, value: String) -> Self {
         self.metadata.insert(key.to_owned(), value);
         self
@@ -84,7 +86,7 @@ impl<TypeT: Serialize, SpecT: Serialize, StateT: Serialize> GenericResource<Type
         serde_json::to_string(&self).unwrap().to_string()
     }
 
-    /// Turn a resource into an etcd PutRequest.
+    /// Turn a resource into an etcd `PutRequest`.
     pub fn to_put_request(self, etcd_config: &etcd::Config) -> PutRequest {
         PutRequest {
             key: self.key(etcd_config).into(),

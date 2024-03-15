@@ -105,7 +105,7 @@ impl watcher::Watcher for WatchState {
             if let Some((from, to)) = suffix.split_once('/') {
                 self.add_or_remove_alias_record(is_create, from, to);
             } else {
-                self.add_or_remove_a_record(is_create, suffix, kv.value)
+                self.add_or_remove_a_record(is_create, suffix, kv.value);
             }
         } else {
             tracing::warn!(?key, "unexpected watch key");
@@ -178,7 +178,7 @@ impl WatchState {
         for (name, addresses) in records.drain() {
             for address in addresses {
                 // use a TTL of 0 so they just inherit the value from the zone
-                zone.insert(&name, RecordTypeWithData::A { address }, 0)
+                zone.insert(&name, RecordTypeWithData::A { address }, 0);
             }
         }
         let mut zones = Zones::default();
@@ -201,7 +201,7 @@ impl WatchState {
             for alias in aliases {
                 rs = rs
                     .union(&self.resolve_alias_records(records, alias))
-                    .cloned()
+                    .copied()
                     .collect::<HashSet<Ipv4Addr>>();
             }
             records.insert(name.clone(), rs.clone());
@@ -281,7 +281,7 @@ async fn prune_cache_task(cache: SharedCache) {
             ?expired,
             ?pruned,
             "pruned DNS cache"
-        )
+        );
     }
 }
 

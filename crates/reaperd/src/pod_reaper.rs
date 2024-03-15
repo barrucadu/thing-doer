@@ -44,7 +44,7 @@ pub async fn task(
                 }
             }
             _ = retry_rx.recv() => {
-                enqueue_retries(to_retry, &reap_pod_tx).await;
+                enqueue_retries(to_retry, &reap_pod_tx);
                 to_retry = Vec::new();
             }
         }
@@ -75,8 +75,8 @@ async fn reap_pod(etcd_config: &etcd::Config, my_name: &str, pod_name: &PodName)
 }
 
 /// Queue up all of the pods in need of retrying.
-async fn enqueue_retries(to_retry: Vec<PodName>, reap_pod_tx: &mpsc::UnboundedSender<PodName>) {
-    for pod_name in to_retry.into_iter() {
+fn enqueue_retries(to_retry: Vec<PodName>, reap_pod_tx: &mpsc::UnboundedSender<PodName>) {
+    for pod_name in to_retry {
         tracing::info!(pod_name = pod_name.0, "retrying unreaped pod");
         reap_pod_tx
             .send(pod_name)
@@ -146,18 +146,18 @@ async fn mark_pod_as_dead(
 async fn txn_check_and_set(
     mut kv_client: kv_client::KvClient<Channel>,
     version: i64,
-    req: PutRequest,
+    put_req: PutRequest,
 ) -> Result<bool, Error> {
     let compare = vec![Compare {
         result: compare::CompareResult::Equal.into(),
         target: compare::CompareTarget::Version.into(),
-        key: req.key.clone(),
+        key: put_req.key.clone(),
         target_union: Some(compare::TargetUnion::Version(version)),
         ..Default::default()
     }];
 
     let success = vec![RequestOp {
-        request: Some(request_op::Request::RequestPut(req)),
+        request: Some(request_op::Request::RequestPut(put_req)),
     }];
 
     let res = kv_client
