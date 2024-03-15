@@ -13,7 +13,7 @@ jobs:
 
       - run: nix flake check
       - run: nix run .#fmt
-      - run: nix run .#clippy
+      - run: nix run .#lint
 
       - name: Check mdbook-admonish changes are not committed
         run: |

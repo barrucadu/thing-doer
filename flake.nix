@@ -33,7 +33,7 @@
           };
         in
         {
-          clippy = mkApp ./scripts/clippy.sh [ ];
+          lint = mkApp ./scripts/lint.sh (with pkgs; [ findutils shellcheck ]);
           documentation = mkApp ./scripts/documentation.sh (with pkgs; [ gnused mdbook mdbook-admonish ]);
           fmt = mkApp ./scripts/fmt.sh (with pkgs; [ git nix ]);
           test = mkApp ./scripts/test.sh [ ];
