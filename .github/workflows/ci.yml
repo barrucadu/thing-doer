@@ -31,3 +31,4 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - run: nix run .#test
+      - run: nix build
