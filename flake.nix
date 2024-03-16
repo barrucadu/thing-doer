@@ -29,6 +29,7 @@
         protobuf
         rustToolchain
       ];
+      vm-base = import ./integration-tests/vm.nix self.packages.${system}.default;
     in
     {
       apps.${system} =
@@ -48,32 +49,65 @@
           test = mkApp ./scripts/test.sh [ ];
         };
 
+      checks.${system} = {
+        vm-works = (pkgs.testers.runNixOSTest (import ./integration-tests/test-vm-works.nix vm-base)).config.result;
+      };
+
       devShells.${system}.default = pkgs.mkShell {
         packages = buildDeps;
       };
 
       formatter.${system} = pkgs.nixpkgs-fmt;
 
-      packages.${system}.default = rustPlatform.buildRustPackage rec {
-        pname = "thing-doer";
-        version = "0.0.0";
+      packages.${system} = {
+        default = rustPlatform.buildRustPackage rec {
+          pname = "thing-doer";
+          version = "0.0.0";
 
-        src = gitignore.lib.gitignoreSource ./.;
+          src = gitignore.lib.gitignoreSource ./.;
 
-        cargoLock = {
-          lockFile = ./Cargo.lock;
-          outputHashes = {
-            "dns-resolver-0.1.0" = "sha256-Fg8fGWdE8VylpszzCXGcQ/HBjtAl9cSwfn5t9btlWpc=";
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            outputHashes = {
+              "dns-resolver-0.1.0" = "sha256-Fg8fGWdE8VylpszzCXGcQ/HBjtAl9cSwfn5t9btlWpc=";
+            };
+          };
+
+          nativeBuildInputs = buildDeps;
+          doCheck = false;
+
+          meta = {
+            description = "A simple container orchestrator.";
+            homepage = "https://github.com/barrucadu/thing-doer";
           };
         };
 
-        nativeBuildInputs = buildDeps;
-        doCheck = false;
+        vm =
+          let
+            vm-config = { config, lib, pkgs, ... }: {
+              networking.hostName = "thing-doer";
+              services.openssh.enable = true;
+              services.openssh.settings.PermitRootLogin = "yes";
+              users.users.root.password = "root";
 
-        meta = {
-          description = "A simple container orchestrator.";
-          homepage = "https://github.com/barrucadu/thing-doer";
-        };
+              # qemu options
+              virtualisation.diskImage = null;
+              virtualisation.graphics = false;
+              virtualisation.sharedDirectories.host = { source = "$VM_SHARED_DIR"; target = "/mnt/host"; };
+              virtualisation.qemu.networkingOptions = [
+                "-net nic,macaddr=52:54:00:$(head -c 1 /dev/urandom | xxd -p):$(head -c 1 /dev/urandom | xxd -p):$(head -c 1 /dev/urandom | xxd -p),model=virtio -net bridge,br=br0"
+              ];
+            };
+            vm-system = nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [
+                vm-config
+                vm-base
+                "${nixpkgs}/nixos/modules/virtualisation/qemu-vm.nix"
+              ];
+            };
+          in
+          vm-system.config.system.build.vm;
       };
     };
 }
