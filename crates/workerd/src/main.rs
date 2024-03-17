@@ -1,6 +1,8 @@
 use clap::Parser;
 use rust_decimal::Decimal;
+use std::fs;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::process;
 
 use nodelib::etcd;
@@ -25,9 +27,18 @@ struct Args {
     pub name: Option<String>,
 
     /// Address to bind on to provide services to local pods.  Must be reachable
-    /// within the cluster.
+    /// within the cluster.  This or `--cluster-address-file` must be specified.
     #[clap(long = "cluster-address", value_parser, env = "CLUSTER_ADDRESS")]
-    pub address: Ipv4Addr,
+    pub cluster_address: Option<Ipv4Addr>,
+
+    /// Read the cluster address from a file.  This option is incompatible with
+    /// `--cluster-address`.
+    #[clap(
+        long = "cluster-address-file",
+        value_parser,
+        env = "CLUSTER_ADDRESS_FILE"
+    )]
+    pub cluster_address_file: Option<PathBuf>,
 
     #[command(flatten)]
     pub etcd: etcd::Config,
@@ -69,7 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let Args {
         name,
-        address,
+        cluster_address,
+        cluster_address_file,
         external_dns,
         cpu,
         memory,
@@ -77,19 +89,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         podman,
     } = Args::parse();
 
+    let actual_cluster_address = match (cluster_address, cluster_address_file) {
+        (Some(_), Some(_)) => {
+            tracing::error!(
+                "--cluster-address cannot be specified at the same time as --cluster-address-file"
+            );
+            process::exit(1);
+        }
+        (Some(ip), _) => ip,
+        (_, Some(fpath)) => match read_ip_from_file(fpath) {
+            Ok(ip) => ip,
+            Err(error) => {
+                tracing::error!(?error, "cannot parse --cluster-address-file");
+                process::exit(1);
+            }
+        },
+        (_, _) => {
+            tracing::error!("--cluster-address or --cluster-address-file must be given");
+            process::exit(1);
+        }
+    };
+
     let state = nodelib::initialise(
         etcd.clone(),
         name,
         NodeType::Worker,
         NodeSpec {
-            address: Some(address),
+            address: Some(actual_cluster_address),
             limits: Some(NodeLimitSpec { cpu, memory }),
         },
         Some(SPECIAL_HOSTNAME),
     )
     .await?;
 
-    cluster_nameserver::initialise(etcd.clone(), &state.name, address, external_dns).await?;
+    cluster_nameserver::initialise(
+        etcd.clone(),
+        &state.name,
+        actual_cluster_address,
+        external_dns,
+    )
+    .await?;
 
     let limit_tx = limits::initialise(
         etcd.clone(),
@@ -103,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         etcd.clone(),
         podman,
         state.name.clone(),
-        address,
+        actual_cluster_address,
         state.alive_lease_id,
         limit_tx,
     );
@@ -125,4 +164,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     nodelib::signal_channel(ch).await;
     process::exit(0)
+}
+
+fn read_ip_from_file(p: PathBuf) -> Result<Ipv4Addr, Box<dyn std::error::Error>> {
+    let ip = fs::read_to_string(p)?.parse()?;
+
+    Ok(ip)
 }
