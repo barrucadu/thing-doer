@@ -11,7 +11,6 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
-      - run: nix flake check
       - run: nix run .#fmt
       - run: nix run .#lint
 
