@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::time::Duration;
 use tonic::transport;
 
@@ -10,13 +9,13 @@ use crate::etcd::pb::etcdserverpb::watch_client::WatchClient;
 pub struct Config {
     /// etcd gRPC endpoints
     #[clap(
-        long = "etcd-hosts",
+        long = "etcd-endpoints",
         value_parser,
         value_delimiter = ',',
-        default_value = "127.0.0.1:2379",
-        env = "ETCD_HOSTS"
+        default_value = "http://127.0.0.1:2379",
+        env = "ETCD_ENDPOINTS"
     )]
-    pub hosts: Vec<SocketAddr>,
+    pub endpoints: Vec<String>,
 
     /// Timeout (in seconds) for connecting to etcd
     #[clap(
@@ -37,11 +36,11 @@ pub struct Config {
 }
 
 impl Config {
-    /// Connect to etcd by trying each host in turn
+    /// Connect to etcd by trying each endpoint in turn
     pub async fn connect(&self) -> Result<transport::Channel, transport::Error> {
-        let mut iter = self.hosts.iter().peekable();
+        let mut iter = self.endpoints.iter().peekable();
         while let Some(addr) = iter.next() {
-            match transport::Endpoint::new(format!("http://{addr}")) {
+            match transport::Endpoint::new(addr.clone()) {
                 Ok(endpoint) => match endpoint
                     .connect_timeout(self.connect_timeout)
                     .connect()
