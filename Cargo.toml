@@ -2,7 +2,6 @@
 
 members = [
   "crates/*",
-  "integration-test-tools",
 ]
 
 resolver = "2"
