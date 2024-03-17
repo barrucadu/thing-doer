@@ -791,19 +791,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "integration-test-tools"
-version = "0.1.0"
-dependencies = [
- "clap",
- "nodelib",
- "rust_decimal",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1656,6 +1643,19 @@ dependencies = [
  "prost-build",
  "quote",
  "syn 2.0.50",
+]
+
+[[package]]
+name = "tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nodelib",
+ "rust_decimal",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
