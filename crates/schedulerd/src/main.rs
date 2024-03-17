@@ -14,7 +14,7 @@ use schedulerd::watcher;
 struct Args {
     /// Name of this instance, must be unique across the cluster.  If
     /// unspecified, a random name is generated.
-    #[clap(long)]
+    #[clap(long, env = "NODE_NAME")]
     pub name: Option<String>,
 
     #[command(flatten)]

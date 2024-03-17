@@ -17,7 +17,7 @@ pub static SPECIAL_HOSTNAME: &str = "api";
 struct Args {
     /// Name of this instance, must be unique across the cluster.  If
     /// unspecified, a random name is generated.
-    #[clap(long)]
+    #[clap(long, env = "NODE_NAME")]
     pub name: Option<String>,
 
     /// Cluster address to bind on to provide services to pods.  This, or
