@@ -45,6 +45,11 @@ fi
 
 FLANNEL_GATEWAY="${FLANNEL_SUBNET%/*}"
 
+# see integration-tests/node.nix
+if [[ "$IN_THING_DOER_VM" == "1" ]]; then
+    echo -n "$FLANNEL_GATEWAY" > "/tmp/cluster-address"
+fi
+
 podman network create --disable-dns --driver=bridge --interface-name="$PODMAN_INTERFACE_NAME" -o mtu="$FLANNEL_MTU" "$PODMAN_NETWORK_NAME" >/dev/null
 
 NETWORK_FILE="/etc/containers/networks/${PODMAN_NETWORK_NAME}.json"
