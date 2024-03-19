@@ -426,7 +426,7 @@ checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 [[package]]
 name = "dns-resolver"
 version = "0.1.0"
-source = "git+https://github.com/barrucadu/resolved.git#d99013dd1de52f74e5dc3dcdbff628e5f33e624b"
+source = "git+https://github.com/barrucadu/resolved.git#5246f7111a843ff6a9d8a0165d17b8b4615a7cb1"
 dependencies = [
  "async-recursion",
  "bytes",
@@ -440,7 +440,7 @@ dependencies = [
 [[package]]
 name = "dns-types"
 version = "0.1.0"
-source = "git+https://github.com/barrucadu/resolved.git#d99013dd1de52f74e5dc3dcdbff628e5f33e624b"
+source = "git+https://github.com/barrucadu/resolved.git#5246f7111a843ff6a9d8a0165d17b8b4615a7cb1"
 dependencies = [
  "bytes",
 ]
