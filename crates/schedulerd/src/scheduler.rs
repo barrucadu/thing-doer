@@ -166,8 +166,12 @@ fn choose_worker_for_pod(
     let limits = pod.spec.aggregate_resources();
     let mut candidates = Vec::with_capacity(workers.len());
     for (name, node) in workers {
-        if limits.cpu_ok(node.available_cpu) && limits.memory_ok(node.available_memory) {
-            candidates.push(name.to_owned());
+        let worker_name = name.to_owned();
+        if pod.spec.is_worker_acceptable(&worker_name)
+            && limits.cpu_ok(node.available_cpu)
+            && limits.memory_ok(node.available_memory)
+        {
+            candidates.push(worker_name);
         }
     }
     candidates.choose(&mut rand::thread_rng()).cloned()
