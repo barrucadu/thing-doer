@@ -113,7 +113,7 @@ async fn mark_pod_as_dead(
         return Ok(false);
     }
 
-    let version = res.kvs[0].version;
+    let mod_revision = res.kvs[0].mod_revision;
     let bytes = res.kvs[0].value.clone();
     match PodResource::try_from(bytes) {
         Ok(pod) => {
@@ -122,7 +122,7 @@ async fn mark_pod_as_dead(
             } else {
                 txn_check_and_set(
                     kv_client,
-                    version,
+                    mod_revision,
                     pod.with_state(PodState::Dead)
                         .with_metadata("reapedBy", my_name.to_owned())
                         .to_put_request(etcd_config),
@@ -145,14 +145,14 @@ async fn mark_pod_as_dead(
 /// if so, update it.
 async fn txn_check_and_set(
     mut kv_client: kv_client::KvClient<Channel>,
-    version: i64,
+    mod_revision: i64,
     put_req: PutRequest,
 ) -> Result<bool, Error> {
     let compare = vec![Compare {
         result: compare::CompareResult::Equal.into(),
-        target: compare::CompareTarget::Version.into(),
+        target: compare::CompareTarget::Mod.into(),
         key: put_req.key.clone(),
-        target_union: Some(compare::TargetUnion::Version(version)),
+        target_union: Some(compare::TargetUnion::ModRevision(mod_revision)),
         ..Default::default()
     }];
 

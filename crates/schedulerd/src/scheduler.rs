@@ -23,13 +23,32 @@ pub static MAXIMUM_RETRIES: u64 = 5;
 /// Interval to retry pods that could not be scheduled.
 pub static RETRY_INTERVAL: u64 = 60;
 
+/// A pod-to-schedule plus metadata
+#[derive(Clone)]
+pub struct UnscheduledPod {
+    resource: PodResource,
+    mod_revision: i64,
+    retries: u64,
+}
+
+impl UnscheduledPod {
+    /// Construct a new `UnscheduledPod`.
+    pub fn new(resource: PodResource, mod_revision: i64) -> Self {
+        Self {
+            resource,
+            mod_revision,
+            retries: 0,
+        }
+    }
+}
+
 /// Background task to schedule pods.
 pub async fn task(
     etcd_config: etcd::Config,
     node_state: SharedNodeState,
     my_name: String,
-    mut new_pod_rx: mpsc::UnboundedReceiver<(PodResource, u64)>,
-    new_pod_tx: mpsc::UnboundedSender<(PodResource, u64)>,
+    mut new_pod_rx: mpsc::UnboundedReceiver<UnscheduledPod>,
+    new_pod_tx: mpsc::UnboundedSender<UnscheduledPod>,
 ) {
     let (retry_tx, mut retry_rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
@@ -45,25 +64,27 @@ pub async fn task(
     loop {
         tokio::select! {
             msg = new_pod_rx.recv() => {
-                let (pod, retries) = msg.unwrap();
+                let mut unscheduled_pod = msg.unwrap();
                 // for logging
-                let pod_name = pod.name.clone();
+                let pod_name = unscheduled_pod.resource.name.clone();
+                let retries = unscheduled_pod.retries;
                 tracing::info!(pod_name, ?retries, "got schedule request");
-                match schedule_pod(&etcd_config, &node_state, &my_name, pod.clone()).await {
+                match schedule_pod(&etcd_config, &node_state, &my_name, unscheduled_pod.clone()).await {
                     ScheduleResult::Ok => (),
                     ScheduleResult::RetryWithoutPenalty => {
                         tracing::warn!(pod_name, ?retries, "could not schedule pod, retrying without penalty...");
-                        to_retry.push((pod, retries));
+                        to_retry.push(unscheduled_pod);
                     }
                     ScheduleResult::RetryWithPenalty => {
-                        if retries == MAXIMUM_RETRIES {
+                        if unscheduled_pod.retries == MAXIMUM_RETRIES {
                             tracing::warn!(pod_name, ?retries, "could not schedule pod, retry limit reached");
-                            if let Err(error) = abandon_pod(&etcd_config, &my_name, pod).await {
+                            if let Err(error) = abandon_pod(&etcd_config, &my_name, unscheduled_pod).await {
                                 tracing::warn!(pod_name, ?error, "could not abandon pod");
                             }
                         } else {
                             tracing::warn!(pod_name, ?retries, "could not schedule pod, retrying with penalty...");
-                            to_retry.push((pod, retries +1));
+                            unscheduled_pod.retries += 1;
+                            to_retry.push(unscheduled_pod);
                         }
                     }
                 }
@@ -78,11 +99,11 @@ pub async fn task(
 
 /// Queue up all of the pods in need of retrying.
 fn enqueue_retries(
-    to_retry: Vec<(PodResource, u64)>,
-    new_pod_tx: &mpsc::UnboundedSender<(PodResource, u64)>,
+    to_retry: Vec<UnscheduledPod>,
+    new_pod_tx: &mpsc::UnboundedSender<UnscheduledPod>,
 ) {
     for x in to_retry {
-        tracing::info!(pod_name = x.0.name, "retrying unscheduled pod");
+        tracing::info!(pod_name = x.resource.name, "retrying unscheduled pod");
         new_pod_tx
             .send(x)
             .expect("could not send to unbounded channel");
@@ -106,10 +127,10 @@ async fn schedule_pod(
     etcd_config: &etcd::Config,
     node_state: &SharedNodeState,
     my_name: &str,
-    pod: PodResource,
+    unscheduled_pod: UnscheduledPod,
 ) -> ScheduleResult {
     // for logging
-    let pod_name = pod.name.clone();
+    let pod_name = unscheduled_pod.resource.name.clone();
 
     let workers = node_state.get_healthy_workers().await;
     if workers.is_empty() {
@@ -117,8 +138,8 @@ async fn schedule_pod(
         return ScheduleResult::RetryWithoutPenalty;
     }
 
-    if let Some(worker_name) = choose_worker_for_pod(&workers, &pod) {
-        match apply_pod_schedule(etcd_config, my_name, &worker_name, pod).await {
+    if let Some(worker_name) = choose_worker_for_pod(&workers, &unscheduled_pod.resource) {
+        match apply_pod_schedule(etcd_config, my_name, &worker_name, unscheduled_pod).await {
             Ok(true) => {
                 tracing::info!(pod_name, worker_name, "scheduled pod to worker");
                 ScheduleResult::Ok
@@ -157,12 +178,15 @@ async fn apply_pod_schedule(
     etcd_config: &etcd::Config,
     my_name: &str,
     worker_name: &str,
-    pod: PodResource,
+    unscheduled_pod: UnscheduledPod,
 ) -> Result<bool, Error> {
     txn_check_and_schedule(
         etcd_config,
         Some(worker_name),
-        pod.with_state(PodState::Scheduled)
+        unscheduled_pod.mod_revision,
+        unscheduled_pod
+            .resource
+            .with_state(PodState::Scheduled)
             .with_metadata("scheduledBy", my_name.to_owned())
             .with_metadata("workedBy", worker_name.to_owned()),
     )
@@ -173,12 +197,15 @@ async fn apply_pod_schedule(
 async fn abandon_pod(
     etcd_config: &etcd::Config,
     my_name: &str,
-    pod: PodResource,
+    unscheduled_pod: UnscheduledPod,
 ) -> Result<bool, Error> {
     txn_check_and_schedule(
         etcd_config,
         None,
-        pod.with_state(PodState::Abandoned)
+        unscheduled_pod.mod_revision,
+        unscheduled_pod
+            .resource
+            .with_state(PodState::Abandoned)
             .with_metadata("scheduledBy", my_name.into()),
     )
     .await
@@ -186,14 +213,10 @@ async fn abandon_pod(
 
 /// Atomically check if a pod is still unscheduled and if so: delete the
 /// unscheduled flag and write the new resources.
-///
-/// TODO: we should store the create revision when we see the key appear and
-/// compare it here, as this has a slight race condition: if a pod is created,
-/// picked up for scheduling, and then deleted and replaced before we hit this
-/// mfunction, the *old* pod will be assigned to a worker.
 async fn txn_check_and_schedule(
     etcd_config: &etcd::Config,
     worker_name: Option<&str>,
+    mod_revision: i64,
     pod: PodResource,
 ) -> Result<bool, Error> {
     let unscheduled_pod_key = format!(
@@ -202,11 +225,11 @@ async fn txn_check_and_schedule(
         pod_name = pod.name
     );
 
-    // create revision (ie `Create`) = 0 => the key does not exist
     let compare = vec![Compare {
-        result: compare::CompareResult::NotEqual.into(),
-        target: compare::CompareTarget::Create.into(),
+        result: compare::CompareResult::Equal.into(),
+        target: compare::CompareTarget::Mod.into(),
         key: unscheduled_pod_key.clone().into(),
+        target_union: Some(compare::TargetUnion::ModRevision(mod_revision)),
         ..Default::default()
     }];
 
