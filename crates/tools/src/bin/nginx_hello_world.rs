@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ports: vec![ContainerPortSpec::Expose(80)],
                     resources: None,
                 }],
+                scheduling_constraints: None,
             },
         )
         .with_state(PodState::Created),

@@ -11,6 +11,7 @@ use nodelib::etcd::watcher;
 use nodelib::resources::node::{NodeResource, NodeType};
 use nodelib::resources::pod::PodResource;
 
+use crate::scheduler::UnscheduledPod;
 use crate::state::SharedNodeState;
 
 /// Scan etcd for the current state of all worker nodes and unscheduled pods,
@@ -20,7 +21,7 @@ use crate::state::SharedNodeState;
 pub async fn initialise(
     etcd_config: etcd::Config,
     node_state: SharedNodeState,
-    new_pod_tx: mpsc::UnboundedSender<(PodResource, u64)>,
+    new_pod_tx: mpsc::UnboundedSender<UnscheduledPod>,
 ) -> Result<(), Error> {
     watcher::setup_watcher(
         &etcd_config,
@@ -45,7 +46,7 @@ pub async fn initialise(
 struct WatchState {
     etcd_config: etcd::Config,
     node_state: SharedNodeState,
-    new_pod_tx: mpsc::UnboundedSender<(PodResource, u64)>,
+    new_pod_tx: mpsc::UnboundedSender<UnscheduledPod>,
 }
 
 impl watcher::Watcher for WatchState {
@@ -121,7 +122,7 @@ impl watcher::Watcher for WatchState {
                     Ok(resource) => {
                         tracing::info!(pod_name, "found new pod");
                         self.new_pod_tx
-                            .send((resource, 0))
+                            .send(UnscheduledPod::new(resource, kv.mod_revision))
                             .expect("could not send to unbounded channel");
                     }
                     Err(error) => {

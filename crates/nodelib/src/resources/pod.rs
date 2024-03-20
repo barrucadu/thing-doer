@@ -108,9 +108,13 @@ impl FromStr for PodState {
 ///
 /// - Each port mapping uses a unique cluster port.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PodSpec {
     #[serde(default)]
     pub containers: Vec<PodContainerSpec>,
+
+    #[serde(default)]
+    pub scheduling_constraints: Option<PodSchedulingConstraintsSpec>,
 }
 
 /// The specification of a container inside a pod.
@@ -188,6 +192,20 @@ pub struct ContainerResourceSpecInner {
     pub memory: Option<u64>,
 }
 
+/// Constraints on how this pod can be allocated to a worker, in addition to the
+/// container resource requirements.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PodSchedulingConstraintsSpec {
+    /// Only consider eligible workers which are in this list.
+    #[serde(default)]
+    pub may_be_scheduled_on: Option<Vec<String>>,
+
+    /// Do not consider eligible workers which are in this list.
+    #[serde(default)]
+    pub cannot_be_scheduled_on: Option<Vec<String>>,
+}
+
 impl PodSpec {
     /// Aggregate requested resources across all containers: the request is the
     /// sum of all the container requests, the limit is the maximum of all the
@@ -226,6 +244,27 @@ impl PodSpec {
                 cpu: cpu_limits.iter().max().copied(),
                 memory: memory_limits.iter().max().copied(),
             }),
+        }
+    }
+
+    /// Use the `require_worker` and `block_worker` constraints to determine if
+    /// the given worker is able to run this pod.
+    pub fn is_worker_acceptable(&self, worker_name: &String) -> bool {
+        if let Some(constraints) = &self.scheduling_constraints {
+            let may_be_scheduled_on = if let Some(names) = &constraints.may_be_scheduled_on {
+                names.contains(worker_name)
+            } else {
+                true
+            };
+            let cannot_be_scheduled_on = if let Some(names) = &constraints.cannot_be_scheduled_on {
+                names.contains(worker_name)
+            } else {
+                false
+            };
+
+            may_be_scheduled_on && !cannot_be_scheduled_on
+        } else {
+            true
         }
     }
 }

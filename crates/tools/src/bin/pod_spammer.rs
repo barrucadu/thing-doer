@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             limits: None,
                         }),
                     }],
+                    scheduling_constraints: None,
                 },
             )
             .with_state(PodState::Created),
