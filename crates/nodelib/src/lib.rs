@@ -83,7 +83,7 @@ pub async fn initialise(
         dns::create_leased_a_record(
             &etcd_config,
             alive_lease_id,
-            dns::Namespace::Node(node_type),
+            &dns::Namespace::Node(node_type),
             &name,
             ip,
         )
@@ -93,9 +93,9 @@ pub async fn initialise(
             dns::append_alias_record(
                 &etcd_config,
                 Some(alive_lease_id),
-                dns::Namespace::Special,
+                &dns::Namespace::Special,
                 alias,
-                dns::Namespace::Node(node_type),
+                &dns::Namespace::Node(node_type),
                 &name,
             )
             .await?;

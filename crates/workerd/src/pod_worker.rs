@@ -272,7 +272,7 @@ async fn create_pod_dns_record(
     while let Err(error) = dns::create_leased_a_record(
         etcd_config,
         lease_id,
-        dns::Namespace::Pod,
+        &dns::Namespace::Pod,
         &pod_state.hostname,
         pod_state.address,
     )
@@ -288,7 +288,7 @@ async fn create_pod_dns_record(
 /// TODO: add a retry limit
 async fn delete_pod_dns_record(etcd_config: &etcd::Config, pod_state: &podman::PodState) {
     while let Err(error) =
-        dns::delete_record(etcd_config, dns::Namespace::Pod, &pod_state.hostname).await
+        dns::delete_record(etcd_config, &dns::Namespace::Pod, &pod_state.hostname).await
     {
         tracing::warn!(?error, "could not destroy DNS record, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;

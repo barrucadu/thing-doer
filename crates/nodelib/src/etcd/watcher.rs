@@ -7,12 +7,10 @@ use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tonic::{Request, Streaming};
 
 use crate::error::{Error, StreamingError};
+use crate::etcd;
 use crate::etcd::config::Config;
-use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
 use crate::etcd::pb::etcdserverpb::watch_request::RequestUnion;
-use crate::etcd::pb::etcdserverpb::{
-    RangeRequest, WatchCreateRequest, WatchRequest, WatchResponse,
-};
+use crate::etcd::pb::etcdserverpb::{WatchCreateRequest, WatchRequest, WatchResponse};
 use crate::etcd::pb::mvccpb::{event::EventType, Event};
 use crate::etcd::prefix;
 
@@ -40,7 +38,8 @@ pub async fn setup_watcher<W: Watcher + Send + Sync + 'static>(
 ) -> Result<(), Error> {
     let mut start_revision = 0;
     for key_prefix in &key_prefixes {
-        start_revision = scan_initial_state(config, &watcher, key_prefix, start_revision).await?;
+        start_revision =
+            scan_initial_state(config, &watcher, key_prefix.clone(), start_revision).await?;
     }
 
     tokio::spawn(watcher_task(
@@ -59,45 +58,20 @@ pub async fn setup_watcher<W: Watcher + Send + Sync + 'static>(
 async fn scan_initial_state<W: Watcher>(
     config: &Config,
     watcher: &Arc<RwLock<W>>,
-    key_prefix: &str,
-    mut revision: i64,
+    key_prefix: String,
+    revision: i64,
 ) -> Result<i64, Error> {
-    let mut kv_client = config.kv_client().await?;
+    let (kvs, revision) = etcd::util::list_kvs(config, key_prefix, revision).await?;
 
-    let range_end = prefix::range_end(key_prefix);
-    let mut key = key_prefix.as_bytes().to_vec();
-
-    loop {
-        let response = kv_client
-            .range(Request::new(RangeRequest {
-                key,
-                range_end: range_end.clone(),
-                revision,
-                sort_order: SortOrder::Ascend.into(),
-                sort_target: SortTarget::Key.into(),
+    let mut inner = watcher.write().await;
+    for kv in kvs {
+        inner
+            .apply_event(Event {
+                r#type: EventType::Put.into(),
+                kv: Some(kv),
                 ..Default::default()
-            }))
-            .await?
-            .into_inner();
-        revision = response.header.unwrap().revision;
-
-        let mut inner = watcher.write().await;
-        for kv in &response.kvs {
-            inner
-                .apply_event(Event {
-                    r#type: EventType::Put.into(),
-                    kv: Some(kv.clone()),
-                    ..Default::default()
-                })
-                .await;
-        }
-
-        if response.more {
-            let idx = response.kvs.len() - 1;
-            key = response.kvs[idx].key.clone();
-        } else {
-            break;
-        }
+            })
+            .await;
     }
 
     Ok(revision)
