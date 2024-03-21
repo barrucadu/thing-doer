@@ -6,6 +6,7 @@ use crate::error::ResourceError;
 use crate::etcd;
 use crate::etcd::pb::etcdserverpb::PutRequest;
 use crate::etcd::prefix;
+use crate::util;
 
 /// A resource where the type and state are strings and the spec is a JSON
 /// object.
@@ -120,15 +121,9 @@ impl TryFrom<Vec<u8>> for Resource {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/// Check that a name is all lowercase and is a valid DNS label.
+/// Resource names must be valid DNS labels.
 fn is_valid_resource_name(name: &str) -> bool {
-    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '-';
-
-    !name.is_empty()
-        && name.len() <= 63
-        && name.chars().all(valid_character)
-        && name.starts_with(|c: char| c.is_ascii_alphabetic())
-        && !name.ends_with(|c: char| c == '-')
+    util::is_valid_dns_label(name)
 }
 
 /// Check that a type name is nonempty and of the form

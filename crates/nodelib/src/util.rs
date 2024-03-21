@@ -89,3 +89,14 @@ pub fn random_name() -> String {
         d4 = DIGITS.choose(&mut rng).unwrap(),
     )
 }
+
+/// Check that a string is all lowercase and is a valid DNS label.
+pub fn is_valid_dns_label(s: &str) -> bool {
+    let valid_character = |c: char| c.is_ascii_alphanumeric() || c == '-';
+
+    !s.is_empty()
+        && s.len() <= 63
+        && s.chars().all(valid_character)
+        && s.starts_with(|c: char| c.is_ascii_alphabetic())
+        && !s.ends_with(|c: char| c == '-')
+}
