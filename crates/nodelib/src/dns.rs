@@ -9,12 +9,8 @@ use dns_types::zones::types::{Zone, SOA};
 use crate::error::Error;
 use crate::etcd;
 use crate::etcd::leaser::LeaseId;
-use crate::etcd::pb::etcdserverpb::compare;
 use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
-use crate::etcd::pb::etcdserverpb::request_op;
-use crate::etcd::pb::etcdserverpb::{
-    Compare, DeleteRangeRequest, PutRequest, RangeRequest, RequestOp, TxnRequest,
-};
+use crate::etcd::pb::etcdserverpb::{PutRequest, RangeRequest};
 use crate::etcd::prefix;
 use crate::resources::node::NodeType;
 use crate::util;
@@ -98,31 +94,7 @@ pub async fn delete_record(
     namespace: &Namespace,
     hostname: &str,
 ) -> Result<bool, Error> {
-    let key = record_key(etcd_config, namespace, hostname);
-
-    let mut kv_client = etcd_config.kv_client().await?;
-    let res = kv_client
-        .txn(Request::new(TxnRequest {
-            // create revision (ie `Create`) != 0 => the key exists
-            compare: vec![Compare {
-                result: compare::CompareResult::NotEqual.into(),
-                target: compare::CompareTarget::Create.into(),
-                key: key.clone().into(),
-                ..Default::default()
-            }],
-            success: vec![RequestOp {
-                request: Some(request_op::Request::RequestDeleteRange(
-                    DeleteRangeRequest {
-                        key: key.into(),
-                        ..Default::default()
-                    },
-                )),
-            }],
-            failure: Vec::new(),
-        }))
-        .await?;
-
-    Ok(res.into_inner().succeeded)
+    etcd::util::delete_if_exists(etcd_config, record_key(etcd_config, namespace, hostname)).await
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -242,37 +214,17 @@ pub async fn delete_alias_record(
     to_namespace: &Namespace,
     to_hostname: &str,
 ) -> Result<bool, Error> {
-    let key = alias_record_key(
+    etcd::util::delete_if_exists(
         etcd_config,
-        from_namespace,
-        from_hostname,
-        to_namespace,
-        to_hostname,
-    );
-
-    let mut kv_client = etcd_config.kv_client().await?;
-    let res = kv_client
-        .txn(Request::new(TxnRequest {
-            // create revision (ie `Create`) != 0 => the key exists
-            compare: vec![Compare {
-                result: compare::CompareResult::NotEqual.into(),
-                target: compare::CompareTarget::Create.into(),
-                key: key.clone().into(),
-                ..Default::default()
-            }],
-            success: vec![RequestOp {
-                request: Some(request_op::Request::RequestDeleteRange(
-                    DeleteRangeRequest {
-                        key: key.into(),
-                        ..Default::default()
-                    },
-                )),
-            }],
-            failure: Vec::new(),
-        }))
-        .await?;
-
-    Ok(res.into_inner().succeeded)
+        alias_record_key(
+            etcd_config,
+            from_namespace,
+            from_hostname,
+            to_namespace,
+            to_hostname,
+        ),
+    )
+    .await
 }
 
 ///////////////////////////////////////////////////////////////////////////////

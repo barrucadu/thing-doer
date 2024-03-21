@@ -217,40 +217,19 @@ pub async fn create_and_schedule_pod(
 ///
 /// Returns `false` if the resource does not exist.
 pub async fn delete(etcd_config: &etcd::Config, rtype: &str, rname: &str) -> Result<bool, Error> {
-    let resource_key = format!(
-        "{prefix}{rname}",
-        prefix = prefix::resource(etcd_config, rtype),
-    );
-
-    let mut kv_client = etcd_config.kv_client().await?;
-    let res = kv_client
-        .txn(Request::new(TxnRequest {
-            // create revision (ie `Create`) != 0 => the key exists
-            compare: vec![Compare {
-                result: compare::CompareResult::NotEqual.into(),
-                target: compare::CompareTarget::Create.into(),
-                key: resource_key.clone().into(),
-                ..Default::default()
-            }],
-            success: vec![RequestOp {
-                request: Some(request_op::Request::RequestDeleteRange(
-                    DeleteRangeRequest {
-                        key: resource_key.into(),
-                        ..Default::default()
-                    },
-                )),
-            }],
-            failure: Vec::new(),
-        }))
-        .await;
-
-    match res {
-        Ok(r) => Ok(r.into_inner().succeeded),
-        Err(error) => {
-            tracing::warn!(?error, rtype, rname, "could not delete resource");
-            Err(error.into())
-        }
+    let res = etcd::util::delete_if_exists(
+        etcd_config,
+        format!(
+            "{prefix}{rname}",
+            prefix = prefix::resource(etcd_config, rtype),
+        ),
+    )
+    .await;
+    if let Err(ref error) = res {
+        tracing::warn!(?error, rtype, rname, "could not delete resource");
     }
+
+    res
 }
 
 /// Delete a pod resource and signal that it should be unscheduled / killed.
