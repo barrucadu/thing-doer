@@ -9,7 +9,6 @@ use dns_types::zones::types::{Zone, SOA};
 use crate::error::Error;
 use crate::etcd;
 use crate::etcd::leaser::LeaseId;
-use crate::etcd::pb::etcdserverpb::range_request::{SortOrder, SortTarget};
 use crate::etcd::pb::etcdserverpb::{PutRequest, RangeRequest};
 use crate::etcd::prefix;
 use crate::resources::node::NodeType;
@@ -105,44 +104,17 @@ pub async fn list_aliases(
     from_namespace: &Namespace,
     from_hostname: &str,
 ) -> Result<Vec<String>, Error> {
-    let mut out = Vec::new();
-
-    let mut kv_client = etcd_config.kv_client().await?;
-    let mut revision = 0;
-
     let key_prefix = format!(
         "{prefix}/",
         prefix = record_key(etcd_config, from_namespace, from_hostname),
     );
-    let range_end = prefix::range_end(&key_prefix);
-    let mut key = key_prefix.clone().as_bytes().to_vec();
+    let (kvs, _) = etcd::util::list_kvs(etcd_config, key_prefix.clone(), 0).await?;
 
-    loop {
-        let response = kv_client
-            .range(Request::new(RangeRequest {
-                key,
-                range_end: range_end.clone(),
-                revision,
-                sort_order: SortOrder::Ascend.into(),
-                sort_target: SortTarget::Key.into(),
-                ..Default::default()
-            }))
-            .await?
-            .into_inner();
-        revision = response.header.unwrap().revision;
-
-        for kv in &response.kvs {
-            let key = String::from_utf8(kv.key.clone()).unwrap();
-            let (_, name) = key.split_once(&key_prefix).unwrap();
-            out.push(name.to_string());
-        }
-
-        if response.more {
-            let idx = response.kvs.len() - 1;
-            key = response.kvs[idx].key.clone();
-        } else {
-            break;
-        }
+    let mut out = Vec::with_capacity(kvs.len());
+    for kv in kvs {
+        let key = String::from_utf8(kv.key).unwrap();
+        let (_, name) = key.split_once(&key_prefix).unwrap();
+        out.push(name.to_string());
     }
 
     Ok(out)
