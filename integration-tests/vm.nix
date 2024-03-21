@@ -90,6 +90,7 @@ with lib;
 
     systemd.services.thing-doer-workerd = {
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/workerd";
+      path = [ pkgs.podman ];
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
         ETCD_HOSTS = config.thingDoer.etcdHosts;
