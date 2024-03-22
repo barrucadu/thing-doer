@@ -57,6 +57,7 @@ with lib;
 
     networking.firewall.allowedTCPPorts = [ 2379 ];
     networking.firewall.allowedUDPPorts = [ 8472 ];
+    networking.firewall.trustedInterfaces = [ "flannel.1" "podman_flannel" ];
 
     virtualisation.podman.enable = true;
 

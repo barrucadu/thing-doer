@@ -49,9 +49,12 @@
           test = mkApp ./scripts/test.sh [ ];
         };
 
-      checks.${system} = {
-        vm-works = (pkgs.testers.runNixOSTest (import ./integration-tests/test-vm-works.nix vm-base)).config.result;
-      };
+      checks.${system} =
+        let runTest = f: (pkgs.testers.runNixOSTest (import f { inherit pkgs; defaults = vm-base; })).config.result; in
+        {
+          container-networking = runTest ./integration-tests/test-container-networking.nix;
+          vm-works = runTest ./integration-tests/test-vm-works.nix;
+        };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = buildDeps;
