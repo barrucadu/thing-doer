@@ -136,6 +136,7 @@ pub async fn start_container(
         "container",
         "run",
         "--detach",
+        "--tty",
         "--pull=newer",
         &format!("--pod={pod_name}", pod_name = pod_state.name),
         &format!("--name={podman_container_name}"),
