@@ -1,4 +1,4 @@
-defaults: {
+{ defaults, ... }: {
   inherit defaults;
 
   name = "VM can start all services";

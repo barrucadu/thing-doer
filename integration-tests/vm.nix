@@ -5,11 +5,11 @@ with lib;
 {
   options.thingDoer = {
     nodeName = mkOption {
-      type = types.str;
+      type = types.nullOr types.str;
       default = config.networking.hostName;
     };
 
-    etcdHosts = mkOption {
+    etcdEndpoints = mkOption {
       type = types.str;
       default = "http://127.0.0.1:2379";
     };
@@ -57,6 +57,7 @@ with lib;
 
     networking.firewall.allowedTCPPorts = [ 2379 ];
     networking.firewall.allowedUDPPorts = [ 8472 ];
+    networking.firewall.trustedInterfaces = [ "flannel.1" "podman_flannel" ];
 
     virtualisation.podman.enable = true;
 
@@ -66,7 +67,7 @@ with lib;
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/apid";
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
-        ETCD_HOSTS = config.thingDoer.etcdHosts;
+        ETCD_ENDPOINTS = config.thingDoer.etcdEndpoints;
         CLUSTER_ADDRESS_FILE = config.thingDoer.clusterAddressFile;
         EXTERNAL_ADDRESS = config.thingDoer.apid.externalAddress;
       };
@@ -76,7 +77,7 @@ with lib;
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/reaperd";
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
-        ETCD_HOSTS = config.thingDoer.etcdHosts;
+        ETCD_ENDPOINTS = config.thingDoer.etcdEndpoints;
       };
     };
 
@@ -84,15 +85,16 @@ with lib;
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/schedulerd";
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
-        ETCD_HOSTS = config.thingDoer.etcdHosts;
+        ETCD_ENDPOINTS = config.thingDoer.etcdEndpoints;
       };
     };
 
     systemd.services.thing-doer-workerd = {
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/workerd";
+      path = [ pkgs.podman ];
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
-        ETCD_HOSTS = config.thingDoer.etcdHosts;
+        ETCD_ENDPOINTS = config.thingDoer.etcdEndpoints;
         CLUSTER_ADDRESS_FILE = config.thingDoer.clusterAddressFile;
         CPU = toString config.thingDoer.workerd.cpuLimit;
         MEMORY = toString config.thingDoer.workerd.memoryLimit;
