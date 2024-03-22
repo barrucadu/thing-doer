@@ -5,7 +5,7 @@ with lib;
 {
   options.thingDoer = {
     nodeName = mkOption {
-      type = types.str;
+      type = types.nullOr types.str;
       default = config.networking.hostName;
     };
 

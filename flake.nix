@@ -92,6 +92,7 @@
               services.openssh.enable = true;
               services.openssh.settings.PermitRootLogin = "yes";
               users.users.root.password = "root";
+              thingDoer.nodeName = null; # force randomly-generated names
 
               # qemu options
               virtualisation.diskImage = null;
