@@ -46,6 +46,8 @@ with lib;
     # see tools/configure-podman-network.sh
     environment.sessionVariables.IN_THING_DOER_VM = "1";
 
+    boot.kernelModules = [ "br_netfilter" ];
+
     environment.systemPackages = with pkgs; [
       etcd
       flannel
@@ -91,7 +93,7 @@ with lib;
 
     systemd.services.thing-doer-workerd = {
       serviceConfig.ExecStart = "${thingDoerPackage}/bin/workerd";
-      path = [ pkgs.podman ];
+      path = [ pkgs.iptables pkgs.podman ];
       environment = {
         NODE_NAME = config.thingDoer.nodeName;
         ETCD_ENDPOINTS = config.thingDoer.etcdEndpoints;

@@ -30,9 +30,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     entrypoint: None,
                     cmd: Vec::new(),
                     env: HashMap::new(),
-                    ports: vec![ContainerPortSpec::Expose(80)],
                     resources: None,
                 }],
+                ports: vec![PodPortSpec::Expose(80)],
                 scheduling_constraints: None,
             },
         )

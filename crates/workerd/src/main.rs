@@ -121,10 +121,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(SPECIAL_HOSTNAME),
     )
     .await?;
+    let node_name = state.name.clone();
+
+    // TODO: kill pods and cleanup iptables rules left over from a prior unclean
+    // shutdown.
+    podman::initialise_iptables(&podman, &node_name).await?;
 
     cluster_nameserver::initialise(
         etcd.clone(),
-        &state.name,
+        &node_name,
         actual_cluster_address,
         external_dns,
     )
@@ -132,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let limit_tx = limits::initialise(
         etcd.clone(),
-        state.name.clone(),
+        node_name.clone(),
         state.alive_lease_id,
         cpu,
         memory,
@@ -140,15 +145,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     let (pw_handle, work_pod_tx, kill_pod_tx) = pod_worker::initialise(
         etcd.clone(),
-        podman,
-        state.name.clone(),
+        podman.clone(),
+        node_name.clone(),
         actual_cluster_address,
         state.alive_lease_id,
         limit_tx,
     );
     let pc_handle = pod_claimer::initialise(
         etcd.clone(),
-        state.name.clone(),
+        node_name.clone(),
         state.alive_lease_id,
         work_pod_tx,
     )
@@ -161,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // also stop claiming new ones.
     pc_handle.terminate().await;
     pw_handle.terminate().await;
+    podman::teardown_iptables(&podman, &node_name).await?;
 
     nodelib::signal_channel(ch).await;
     process::exit(0)

@@ -221,6 +221,14 @@ Check you don't have anything else listening on port 80 (TCP) already.
 
 Check you don't have anything else listening on port 53 (UDP or TCP) already.
 
+### Cluster port mapping is not working
+
+Ensure you have the `br_netfilter` module loaded:
+
+```bash
+sudo modprobe br_netfilter
+```
+
 ### Containers on different hosts cannot reach each other
 
 Open UDP port `8472` in the firewalls.

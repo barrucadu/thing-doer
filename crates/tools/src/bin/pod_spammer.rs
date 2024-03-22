@@ -55,7 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ("FOO".to_owned(), "1".to_owned()),
                             ("BAR".to_owned(), "2".to_owned()),
                         ]),
-                        ports: Vec::new(),
                         resources: Some(ContainerResourceSpec {
                             requests: Some(ContainerResourceSpecInner {
                                 cpu: Some(cpu),
@@ -64,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             limits: None,
                         }),
                     }],
+                    ports: Vec::new(),
                     scheduling_constraints: None,
                 },
             )

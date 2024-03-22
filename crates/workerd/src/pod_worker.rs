@@ -245,14 +245,14 @@ async fn run_and_wait_for_pod(
             for container in &pod.spec.containers {
                 if !podman::start_container(&prc.podman, &pod_state, container).await? {
                     delete_pod_dns_record(&prc.etcd, &pod_state).await;
-                    podman::terminate_pod(&prc.podman, &pod_state).await?;
+                    podman::terminate_pod(&prc.podman, &prc.node_name, &pod_state).await?;
                     return Ok(None);
                 }
             }
 
             let wfc = podman::wait_for_containers(&prc.podman, &pod_state, &mut kill_rx).await?;
             delete_pod_dns_record(&prc.etcd, &pod_state).await;
-            podman::terminate_pod(&prc.podman, &pod_state).await?;
+            podman::terminate_pod(&prc.podman, &prc.node_name, &pod_state).await?;
             Ok(Some(wfc))
         }
         None => Ok(None),

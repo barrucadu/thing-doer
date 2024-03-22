@@ -113,6 +113,9 @@ pub struct PodSpec {
     #[serde(default)]
     pub containers: Vec<PodContainerSpec>,
 
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<PodPortSpec>,
+
     #[serde(default)]
     pub scheduling_constraints: Option<PodSchedulingConstraintsSpec>,
 }
@@ -139,31 +142,9 @@ pub struct PodContainerSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
 
-    /// Ports to expose.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ports: Vec<ContainerPortSpec>,
-
     /// Resources to use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<ContainerResourceSpec>,
-}
-
-/// A port to expose.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged, rename_all = "camelCase")]
-pub enum ContainerPortSpec {
-    /// Semantically equivalent to `Map` with just `container` specified - this
-    /// is to allow terser spec JSON in that case.
-    Expose(u16),
-    Map {
-        /// The container port to expose to the cluster.
-        container: u16,
-
-        /// The port, on the pod's cluster IP, to expose the container port on.  If
-        /// unspecified, use the same as the container port.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cluster: Option<u16>,
-    },
 }
 
 /// The requested and maximum resources of a container.
@@ -190,6 +171,24 @@ pub struct ContainerResourceSpecInner {
     /// An amount of memory, in MiB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<u64>,
+}
+
+/// A port to expose.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged, rename_all = "camelCase")]
+pub enum PodPortSpec {
+    /// Semantically equivalent to `Map` with just `container` specified - this
+    /// is to allow terser spec JSON in that case.
+    Expose(u16),
+    Map {
+        /// The container port to expose to the cluster.
+        container: u16,
+
+        /// The port, on the pod's cluster IP, to expose the container port on.  If
+        /// unspecified, use the same as the container port.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cluster: Option<u16>,
+    },
 }
 
 /// Constraints on how this pod can be allocated to a worker, in addition to the

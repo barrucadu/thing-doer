@@ -41,11 +41,30 @@ pub struct Config {
         env = "PODMAN_BRIDGE_NETWORK"
     )]
     pub bridge_network: String,
+
+    /// Name of the iptables binary.  Defaults to "iptables".
+    #[clap(
+        long = "iptables-command",
+        value_parser,
+        default_value = "iptables",
+        env = "IPTABLES_CMD"
+    )]
+    pub iptables: String,
+
+    /// Name of the iptables chain to create.  If not given defaults to the node name.
+    #[clap(long = "iptables-chain", value_parser, env = "IPTABLES_CHAIN")]
+    pub iptables_chain: Option<String>,
 }
 
 impl Config {
-    fn command(&self) -> Command {
+    fn podman(&self) -> Command {
         let mut cmd = Command::new(self.podman.clone());
+        cmd.stdin(Stdio::null()).kill_on_drop(true);
+        cmd
+    }
+
+    fn iptables(&self) -> Command {
+        let mut cmd = Command::new(self.iptables.clone());
         cmd.stdin(Stdio::null()).kill_on_drop(true);
         cmd
     }
@@ -58,6 +77,7 @@ pub struct PodState {
     pub hostname: String,
     pub infra_container_id: String,
     pub address: Ipv4Addr,
+    pub ports: Vec<PodPortSpec>,
 }
 
 /// Create the pod that will hold the containers.  All containers in the same
@@ -77,28 +97,13 @@ pub async fn create_pod(
         name = pod.name,
     );
 
-    let mut cmd = config.command();
+    let mut cmd = config.podman();
     cmd.args([
         "pod",
         "create",
         &format!("--dns={dns_ip}"),
         &format!("--network={network}", network = config.bridge_network),
     ]);
-    for container in &pod.spec.containers {
-        for port in &container.ports {
-            match port {
-                ContainerPortSpec::Expose(p) => cmd.arg(format!("--publish={p}")),
-                ContainerPortSpec::Map {
-                    container,
-                    cluster: None,
-                } => cmd.arg(format!("--publish={container}")),
-                ContainerPortSpec::Map {
-                    container,
-                    cluster: Some(p),
-                } => cmd.arg(format!("--publish={p}:{container}")),
-            };
-        }
-    }
     cmd.arg(&podman_pod_name);
 
     let exit_status = cmd.spawn()?.wait().await?;
@@ -107,11 +112,13 @@ pub async fn create_pod(
         start_container_by_id(config, &infra_container_id).await?;
 
         let address = get_container_ip_by_id(config, &infra_container_id).await?;
+        create_pod_iptables_rules(config, my_name, address, &pod.spec.ports).await?;
         Ok(Some(PodState {
             name: podman_pod_name,
             hostname: pod.name.clone(),
             infra_container_id,
             address,
+            ports: pod.spec.ports.clone(),
         }))
     } else {
         Ok(None)
@@ -131,7 +138,7 @@ pub async fn start_container(
         name = container.name,
     );
 
-    let mut cmd = config.command();
+    let mut cmd = config.podman();
     cmd.args([
         "container",
         "run",
@@ -192,7 +199,6 @@ pub async fn wait_for_containers(
         tokio::select! {
             () = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL)) => (),
             ch = &mut kill_rx => {
-                let _ = terminate_pod(config, pod_state).await;
                 return Ok(WFC::Signal(ch.unwrap()));
             }
         }
@@ -200,13 +206,139 @@ pub async fn wait_for_containers(
 }
 
 /// Terminate any running containers in a pod, and delete it.
-pub async fn terminate_pod(config: &Config, pod_state: &PodState) -> std::io::Result<()> {
-    let mut cmd = config.command();
+pub async fn terminate_pod(
+    config: &Config,
+    my_name: &str,
+    pod_state: &PodState,
+) -> std::io::Result<()> {
+    delete_pod_iptables_rules(config, my_name, pod_state).await?;
+
+    let mut cmd = config.podman();
     cmd.args(["pod", "rm", "-f", &pod_state.name]);
 
     // TODO: handle exit failure
     let _ = cmd.spawn()?.wait().await?;
     Ok(())
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/// Create the iptables `nat` chain and link it to the default `PREROUTING` and
+/// `OUTPUT` chains.
+pub async fn initialise_iptables(config: &Config, my_name: &str) -> std::io::Result<()> {
+    let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
+
+    let mut create_nat_chain_cmd = config.iptables();
+    create_nat_chain_cmd.args(["-t", "nat", "-N", &chain_name]);
+
+    let mut prerouting_jump_cmd = config.iptables();
+    prerouting_jump_cmd.args(["-t", "nat", "-A", "PREROUTING", "-j", &chain_name]);
+
+    let mut output_jump_cmd = config.iptables();
+    output_jump_cmd.args(["-t", "nat", "-A", "OUTPUT", "-j", &chain_name]);
+
+    // TODO: handle exit failure
+    let _ = create_nat_chain_cmd.spawn()?.wait().await?;
+    let _ = prerouting_jump_cmd.spawn()?.wait().await?;
+    let _ = output_jump_cmd.spawn()?.wait().await?;
+
+    Ok(())
+}
+
+/// Delete all the iptables rules and chains.
+pub async fn teardown_iptables(config: &Config, my_name: &str) -> std::io::Result<()> {
+    let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
+
+    let mut detach_prerouting_cmd = config.iptables();
+    detach_prerouting_cmd.args(["-t", "nat", "-D", "PREROUTING", "-j", &chain_name]);
+
+    let mut detach_output_cmd = config.iptables();
+    detach_output_cmd.args(["-t", "nat", "-D", "OUTPUT", "-j", &chain_name]);
+
+    let mut purge_cmd = config.iptables();
+    purge_cmd.args(["-t", "nat", "-F", &chain_name]);
+
+    let mut delete_cmd = config.iptables();
+    delete_cmd.args(["-t", "nat", "-X", &chain_name]);
+
+    // TODO: handle exit failure
+    let _ = detach_prerouting_cmd.spawn()?.wait().await?;
+    let _ = detach_output_cmd.spawn()?.wait().await?;
+    let _ = purge_cmd.spawn()?.wait().await?;
+    let _ = delete_cmd.spawn()?.wait().await?;
+
+    Ok(())
+}
+
+/// Create the iptables rules for a pod.
+async fn create_pod_iptables_rules(
+    config: &Config,
+    my_name: &str,
+    address: Ipv4Addr,
+    ports: &[PodPortSpec],
+) -> std::io::Result<()> {
+    let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
+
+    // TODO: add a default filter rule forbidding all ports and specific filter
+    // rules allowing the configured cluster ports.
+    for rule in generate_nat_rules(address, ports) {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-A", &chain_name]);
+        cmd.args(rule);
+
+        // TODO: handle exit failure
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    Ok(())
+}
+
+/// Clean up the iptables rules for a pod.
+async fn delete_pod_iptables_rules(
+    config: &Config,
+    my_name: &str,
+    pod_state: &PodState,
+) -> std::io::Result<()> {
+    let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
+
+    for rule in generate_nat_rules(pod_state.address, &pod_state.ports) {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-D", &chain_name]);
+        cmd.args(rule);
+
+        // TODO: handle exit failure
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    Ok(())
+}
+
+/// Generate the NAT rules for a set of port mappings.
+fn generate_nat_rules(address: Ipv4Addr, ports: &[PodPortSpec]) -> Vec<Vec<String>> {
+    let mut out = Vec::with_capacity(ports.len());
+
+    for port in ports {
+        if let PodPortSpec::Map {
+            container,
+            cluster: Some(cluster),
+        } = port
+        {
+            out.push(vec![
+                "-d".to_string(),
+                format!("{address}/32"),
+                "-p".to_string(),
+                "tcp".to_string(),
+                "--dport".to_string(),
+                format!("{cluster}"),
+                "-j".to_string(),
+                "DNAT".to_string(),
+                "--to-destination".to_string(),
+                format!("{address}:{container}"),
+            ]);
+        }
+    }
+
+    out
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -251,7 +383,7 @@ async fn get_pod_infra_container_id(
 
 /// Start a container by ID.
 async fn start_container_by_id(config: &Config, container_id: &str) -> std::io::Result<()> {
-    let mut cmd = config.command();
+    let mut cmd = config.podman();
     cmd.args(["container", "start", container_id]);
 
     // TODO: handle exit failure
@@ -274,7 +406,7 @@ async fn get_container_ip_by_id(config: &Config, container_id: &str) -> std::io:
 
 /// Return the `podman inspect` json for a podman entity.
 async fn podman_inspect(config: &Config, etype: &str, ename: &str) -> std::io::Result<Value> {
-    let mut cmd = config.command();
+    let mut cmd = config.podman();
     let output = cmd.args([etype, "inspect", ename]).output().await?;
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
 
@@ -283,7 +415,7 @@ async fn podman_inspect(config: &Config, etype: &str, ename: &str) -> std::io::R
 
 /// Return the `podman ps` json for a podman pod.
 async fn podman_ps(config: &Config, pname: &str) -> std::io::Result<Vec<Value>> {
-    let mut cmd = config.command();
+    let mut cmd = config.podman();
     let output = cmd
         .args([
             "ps",
