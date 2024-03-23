@@ -9,11 +9,11 @@ use nodelib::etcd;
 use nodelib::resources::node::*;
 
 use workerd::cluster_nameserver;
+use workerd::containers;
 use workerd::limits;
 use workerd::pod_claimer;
 use workerd::pod_killer;
 use workerd::pod_worker;
-use workerd::podman;
 
 /// Add an alias record for the current host to `dns.special.cluster.local.`
 pub static SPECIAL_HOSTNAME: &str = "dns";
@@ -71,7 +71,51 @@ struct Args {
     pub memory: u64,
 
     #[command(flatten)]
-    pub podman: podman::Config,
+    pub containers: ContainersArgs,
+}
+
+#[derive(Clone, Debug, clap::Args)]
+#[group(skip)]
+pub struct ContainersArgs {
+    /// Name of the podman binary.  Defaults to "podman".
+    #[clap(
+        long = "podman-command",
+        value_parser,
+        default_value = "podman",
+        env = "PODMAN_CMD"
+    )]
+    pub podman: String,
+
+    /// Prefix to prepend to pod names so they can be easily identified in
+    /// `podman` command output.  If not given defaults to the node name.
+    #[clap(
+        long = "podman-pod-name-prefix",
+        value_parser,
+        env = "PODMAN_POD_NAME_PREFIX"
+    )]
+    pub pod_name_prefix: Option<String>,
+
+    /// Bridge network to use.  This must already exist, and be set up so that
+    /// all the pods in the cluster can communicate.
+    #[clap(
+        long = "podman-bridge-network",
+        value_parser,
+        env = "PODMAN_BRIDGE_NETWORK"
+    )]
+    pub bridge_network: String,
+
+    /// Name of the iptables binary.  Defaults to "iptables".
+    #[clap(
+        long = "iptables-command",
+        value_parser,
+        default_value = "iptables",
+        env = "IPTABLES_CMD"
+    )]
+    pub iptables: String,
+
+    /// Name of the iptables chain to create.  If not given defaults to the node name.
+    #[clap(long = "iptables-chain", value_parser, env = "IPTABLES_CHAIN")]
+    pub iptables_chain: Option<String>,
 }
 
 #[tokio::main]
@@ -86,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cpu,
         memory,
         etcd,
-        podman,
+        containers,
     } = Args::parse();
 
     let actual_cluster_address = match (cluster_address, cluster_address_file) {
@@ -123,9 +167,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     let node_name = state.name.clone();
 
+    let containers = containers::Config {
+        firewall: containers::firewall::Config {
+            command: containers.iptables.clone(),
+            chain: containers
+                .iptables_chain
+                .clone()
+                .unwrap_or(node_name.clone()),
+        },
+        runtime: containers::runtime::Config {
+            command: containers.podman.clone(),
+            pod_name_prefix: containers
+                .pod_name_prefix
+                .clone()
+                .unwrap_or(node_name.clone()),
+            bridge_network: containers.bridge_network.clone(),
+        },
+    };
+
     // TODO: kill pods and cleanup iptables rules left over from a prior unclean
     // shutdown.
-    podman::initialise_iptables(&podman, &node_name).await?;
+    containers::initialise(&containers).await?;
 
     cluster_nameserver::initialise(
         etcd.clone(),
@@ -145,8 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     let (pw_handle, work_pod_tx, kill_pod_tx) = pod_worker::initialise(
         etcd.clone(),
-        podman.clone(),
-        node_name.clone(),
+        containers.clone(),
         actual_cluster_address,
         state.alive_lease_id,
         limit_tx,
@@ -166,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // also stop claiming new ones.
     pc_handle.terminate().await;
     pw_handle.terminate().await;
-    podman::teardown_iptables(&podman, &node_name).await?;
+    containers::teardown(&containers).await?;
 
     nodelib::signal_channel(ch).await;
     process::exit(0)
