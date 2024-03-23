@@ -108,7 +108,7 @@ pub async fn list_aliases(
         "{prefix}/",
         prefix = record_key(etcd_config, from_namespace, from_hostname),
     );
-    let (kvs, _) = etcd::util::list_kvs(etcd_config, key_prefix.clone(), 0).await?;
+    let (kvs, _) = etcd::util::list_kvs(etcd_config, key_prefix.clone(), None).await?;
 
     let mut out = Vec::with_capacity(kvs.len());
     for kv in kvs {
