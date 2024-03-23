@@ -16,7 +16,7 @@ use crate::etcd::prefix;
 pub async fn list_kvs(
     config: &etcd::Config,
     key_prefix: String,
-    mut revision: i64,
+    start_revision: Option<i64>,
 ) -> Result<(Vec<KeyValue>, i64), Error> {
     let mut out = Vec::new();
 
@@ -25,6 +25,7 @@ pub async fn list_kvs(
     let range_end = prefix::range_end(&key_prefix);
     let mut key = key_prefix.as_bytes().to_vec();
 
+    let mut revision = start_revision.unwrap_or_default();
     loop {
         let response = kv_client
             .range(Request::new(RangeRequest {
@@ -37,7 +38,10 @@ pub async fn list_kvs(
             }))
             .await?
             .into_inner();
-        revision = response.header.unwrap().revision;
+
+        if revision == 0 {
+            revision = response.header.unwrap().revision;
+        }
 
         for kv in &response.kvs {
             out.push(kv.clone());

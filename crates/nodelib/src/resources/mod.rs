@@ -51,7 +51,7 @@ pub async fn get(
 /// List all resources of the given type.
 pub async fn list(etcd_config: &etcd::Config, rtype: &str) -> Result<Vec<Resource>, Error> {
     let (kvs, _) =
-        etcd::util::list_kvs(etcd_config, prefix::resource(etcd_config, rtype), 0).await?;
+        etcd::util::list_kvs(etcd_config, prefix::resource(etcd_config, rtype), None).await?;
 
     let mut out = Vec::with_capacity(kvs.len());
     for kv in kvs {

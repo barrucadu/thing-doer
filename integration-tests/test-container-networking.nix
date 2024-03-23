@@ -132,12 +132,11 @@ in
     # start apid and schedulerd on `infra`, workerd on `node1` and `node2`
     infra.systemctl("start thing-doer-apid")
     infra.systemctl("start thing-doer-schedulerd")
-    infra.wait_for_unit("thing-doer-apid")
-    infra.wait_for_unit("thing-doer-schedulerd")
-
-    # TODO: there is a race condition where concurrent workerd / schedulerd startup can lead to schedulerd missing state
     node1.systemctl("start thing-doer-workerd")
     node2.systemctl("start thing-doer-workerd")
+
+    infra.wait_for_unit("thing-doer-apid")
+    infra.wait_for_unit("thing-doer-schedulerd")
     node1.wait_for_unit("thing-doer-workerd")
     node2.wait_for_unit("thing-doer-workerd")
 

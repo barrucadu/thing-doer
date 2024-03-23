@@ -36,17 +36,21 @@ pub async fn setup_watcher<W: Watcher + Send + Sync + 'static>(
     watcher: Arc<RwLock<W>>,
     key_prefixes: Vec<String>,
 ) -> Result<(), Error> {
-    let mut start_revision = 0;
+    if key_prefixes.is_empty() {
+        return Ok(());
+    }
+
+    let mut start_revision = None;
     for key_prefix in &key_prefixes {
         start_revision =
-            scan_initial_state(config, &watcher, key_prefix.clone(), start_revision).await?;
+            Some(scan_initial_state(config, &watcher, key_prefix.clone(), start_revision).await?);
     }
 
     tokio::spawn(watcher_task(
         config.clone(),
         watcher,
         key_prefixes,
-        start_revision,
+        start_revision.unwrap(),
     ));
 
     Ok(())
@@ -59,7 +63,7 @@ async fn scan_initial_state<W: Watcher>(
     config: &Config,
     watcher: &Arc<RwLock<W>>,
     key_prefix: String,
-    revision: i64,
+    revision: Option<i64>,
 ) -> Result<i64, Error> {
     let (kvs, revision) = etcd::util::list_kvs(config, key_prefix, revision).await?;
 

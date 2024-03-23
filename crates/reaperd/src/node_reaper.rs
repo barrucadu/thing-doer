@@ -130,7 +130,7 @@ async fn get_inbox_for_node(
     node_name: &NodeName,
 ) -> Result<Vec<PodName>, Error> {
     let key_prefix = prefix::worker_inbox(etcd_config, &node_name.0);
-    let (kvs, _) = etcd::util::list_kvs(etcd_config, key_prefix.clone(), 0).await?;
+    let (kvs, _) = etcd::util::list_kvs(etcd_config, key_prefix.clone(), None).await?;
 
     let mut to_reap = Vec::with_capacity(kvs.len());
     for kv in kvs {
