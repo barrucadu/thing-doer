@@ -1,10 +1,9 @@
-# Start three pods on a different VM each:
+# Start four pods across two VMs
 #
-# - machine1: running nginx on port 80
-# - machine2: running nginx on port 8080
-# - machine3: running ubuntu
+# - node1: running nginx on port 80 and a curl pod
+# - node2: running nginx on port 8080 and a curl pod
 #
-# Then check that the ubuntu pod can curl both nginx instances as well as the
+# Then check that the curl pods can reach both nginx instances as well as the
 # API server via their hostnames.
 { defaults, pkgs }:
 let
@@ -74,44 +73,42 @@ let
   };
 in
 {
-  inherit defaults;
-
   name = "Pods on different nodes can communicate";
 
-  nodes =
-    let
-      node = {
-        services.flannel.enable = true;
-        services.flannel.iface = "eth1";
-        services.flannel.etcd.endpoints = [ "http://infra:2379" ];
-
-        thingDoer.etcdEndpoints = "http://infra:2379";
-
-        virtualisation.containers.registries.insecure = [ "infra:5000" ];
-      };
-    in
+  defaults = pkgs.lib.mkMerge [
+    defaults
     {
-      infra = {
-        services.etcd.enable = true;
-        services.etcd.listenClientUrls = [ "http://0.0.0.0:2379" ];
-        services.etcd.advertiseClientUrls = [ "http://infra:2379" ];
+      services.flannel.enable = true;
+      services.flannel.iface = "eth1";
+      services.flannel.etcd.endpoints = [ "http://infra:2379" ];
 
-        services.dockerRegistry.enable = true;
-        services.dockerRegistry.listenAddress = "0.0.0.0";
+      thingDoer.etcdEndpoints = "http://infra:2379";
 
-        virtualisation.podman.enable = true;
-        virtualisation.containers.registries.insecure = [ "infra:5000" ];
+      virtualisation.containers.registries.insecure = [ "infra:5000" ];
+    }
+  ];
 
-        networking.firewall.allowedTCPPorts = [ 2379 5000 ];
+  nodes = {
+    infra = {
+      services.etcd.enable = true;
+      services.etcd.listenClientUrls = [ "http://0.0.0.0:2379" ];
+      services.etcd.advertiseClientUrls = [ "http://infra:2379" ];
 
-        # podman will nondetermistically fail to load the images with the
-        # default disk size of 1024.
-        virtualisation.diskSize = 2048;
-      };
-      node1 = node;
-      node2 = node;
-      node3 = node;
+      services.dockerRegistry.enable = true;
+      services.dockerRegistry.listenAddress = "0.0.0.0";
+
+      virtualisation.podman.enable = true;
+      virtualisation.containers.registries.insecure = [ "infra:5000" ];
+
+      networking.firewall.allowedTCPPorts = [ 2379 5000 ];
+
+      # podman will nondetermistically fail to load the images with the
+      # default disk size of 1024.
+      virtualisation.diskSize = 2048;
     };
+    node1 = { };
+    node2 = { };
+  };
 
   testScript = ''
     import json
@@ -127,22 +124,24 @@ in
     infra.succeed("podman push ${nginxContainerBar.name}")
     infra.succeed("podman push ${curlContainer.name}")
 
-    # start workerd on all three nodes
-    for node in [node1, node2, node3]:
+    # wait for the network
+    for node in [infra, node1, node2]:
       node.wait_for_file("/run/flannel/subnet.env")
       node.succeed("configure-podman-network")
-      node.systemctl("start thing-doer-workerd")
-    # let things start in parallel while blocking
-    for node in [node1, node2, node3]:
-      node.wait_for_unit("thing-doer-workerd")
 
-    # start apid and schedulerd on just node 1
-    node1.systemctl("start thing-doer-apid")
-    node1.systemctl("start thing-doer-schedulerd")
-    node1.wait_for_unit("thing-doer-apid")
-    node1.wait_for_unit("thing-doer-schedulerd")
+    # start apid and schedulerd on `infra`, workerd on `node1` and `node2`
+    infra.systemctl("start thing-doer-apid")
+    infra.systemctl("start thing-doer-schedulerd")
+    infra.wait_for_unit("thing-doer-apid")
+    infra.wait_for_unit("thing-doer-schedulerd")
 
-    # create pods - nginx:80 on node1, nginx:8080 on node2, curl on node3
+    # TODO: there is a race condition where concurrent workerd / schedulerd startup can lead to schedulerd missing state
+    node1.systemctl("start thing-doer-workerd")
+    node2.systemctl("start thing-doer-workerd")
+    node1.wait_for_unit("thing-doer-workerd")
+    node2.wait_for_unit("thing-doer-workerd")
+
+    # create pods - nginx:80 on `node1`, nginx:8080 on `node2`, curl on both
     nginx_pod_on_port_80 = json.dumps({
         "name": "nginx-80",
         "type": "pod",
@@ -153,9 +152,9 @@ in
                 {
                     "name": "web",
                     "image": "${nginxContainerFoo.name}",
-                    "ports": [80],
                 }
             ],
+            "ports": [80],
             "schedulingConstraints": {
                 "mayBeScheduledOn": ["node1"],
             }
@@ -171,16 +170,16 @@ in
                 {
                     "name": "web",
                     "image": "${nginxContainerBar.name}",
-                    "ports": [{ "container": 80, "cluster": 8080 }],
                 }
             ],
+            "ports": [{ "container": 80, "cluster": 8080 }],
             "schedulingConstraints": {
                 "mayBeScheduledOn": ["node2"],
             }
         }
     })
-    test_pod = json.dumps({
-        "name": "test",
+    test_pod_on_node1 = json.dumps({
+        "name": "test1",
         "type": "pod",
         "state": "created",
         "metadata": {},
@@ -192,29 +191,52 @@ in
                 }
             ],
             "schedulingConstraints": {
-                "mayBeScheduledOn": ["node3"],
+                "mayBeScheduledOn": ["node1"],
+            }
+        }
+    })
+    test_pod_on_node2 = json.dumps({
+        "name": "test2",
+        "type": "pod",
+        "state": "created",
+        "metadata": {},
+        "spec": {
+            "containers": [
+                {
+                    "name": "curl",
+                    "image": "${curlContainer.name}",
+                }
+            ],
+            "schedulingConstraints": {
+                "mayBeScheduledOn": ["node2"],
             }
         }
     })
 
-    node1.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_80}' http://127.0.0.1/resources")
-    node1.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_8080}' http://127.0.0.1/resources")
-    node1.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{test_pod}' http://127.0.0.1/resources")
+    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_80}' http://127.0.0.1/resources")
+    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_8080}' http://127.0.0.1/resources")
+    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{test_pod_on_node1}' http://127.0.0.1/resources")
+    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{test_pod_on_node2}' http://127.0.0.1/resources")
 
     # wait for pods to start
     node1.wait_until_succeeds("podman ps | grep nginx-80-web")
     node2.wait_until_succeeds("podman ps | grep nginx-8080-web")
-    node3.wait_until_succeeds("podman ps | grep test-curl")
 
-    # node3 can communicate with apid on node1
-    node3.succeed("podman exec node3-test-curl /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
+    node1.wait_until_succeeds("podman ps | grep test1-curl")
+    node2.wait_until_succeeds("podman ps | grep test2-curl")
 
-    # node3 can communicate with nginx on node1 on port 80
-    node3.succeed("podman exec node3-test-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local")
+    # curl on `node1` can communicate with everything
+    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
+    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
+    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
 
-    # node3 can communicate with nginx on node2 on port 8080 and not on port 80
-    # TODO: the port mapping does not work - these lines should be `succeed` and `fail` respectively
-    node3.fail("podman exec node3-test-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080")
-    node3.succeed("podman exec node3-test-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    # curl on `node2` can communicate with everything
+    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
+    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
+    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
+
+    # nginx-8080 is not accessible over port 80
+    node1.fail("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    node2.fail("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
   '';
 }

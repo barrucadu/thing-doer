@@ -18,8 +18,8 @@ use nodelib::etcd::pb::etcdserverpb::{Compare, DeleteRangeRequest, RequestOp, Tx
 use nodelib::etcd::prefix;
 use nodelib::resources::pod::*;
 
+use crate::containers;
 use crate::limits;
-use crate::podman;
 
 /// Exit code in case the worker channel closes.
 pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
@@ -27,8 +27,7 @@ pub static EXIT_CODE_WORKER_FAILED: i32 = 1;
 /// Start background tasks to work pods.
 pub fn initialise(
     etcd_config: etcd::Config,
-    podman_config: podman::Config,
-    my_name: String,
+    containers_config: containers::Config,
     my_ip: Ipv4Addr,
     lease_id: LeaseId,
     limit_state: limits::State,
@@ -43,8 +42,7 @@ pub fn initialise(
 
     let prc = PodRunConfig {
         etcd: etcd_config,
-        podman: podman_config,
-        node_name: my_name,
+        containers: containers_config,
         node_ip: my_ip,
         node_lease: lease_id,
     };
@@ -78,8 +76,7 @@ impl Handle {
 #[derive(Clone)]
 struct PodRunConfig {
     etcd: etcd::Config,
-    podman: podman::Config,
-    node_name: String,
+    containers: containers::Config,
     node_ip: Ipv4Addr,
     node_lease: LeaseId,
 }
@@ -203,9 +200,9 @@ async fn work_pod<T>(
     set_pod_state(&prc.etcd, pod.clone(), PodState::Running).await;
 
     let (state, ch) = match run_and_wait_for_pod(&prc, &pod, kill_rx).await {
-        Ok(Some(podman::WFC::Terminated(true))) => (PodState::ExitSuccess, None),
-        Ok(Some(podman::WFC::Terminated(false))) => (PodState::ExitFailure, None),
-        Ok(Some(podman::WFC::Signal(ch))) => (PodState::Killed, Some(ch)),
+        Ok(Some(containers::WFC::Terminated(true))) => (PodState::ExitSuccess, None),
+        Ok(Some(containers::WFC::Terminated(false))) => (PodState::ExitFailure, None),
+        Ok(Some(containers::WFC::Signal(ch))) => (PodState::Killed, Some(ch)),
         Ok(None) => {
             tracing::warn!(pod_name, "could not initialise pod");
             (PodState::Errored, None)
@@ -236,23 +233,23 @@ async fn run_and_wait_for_pod(
     prc: &PodRunConfig,
     pod: &PodResource,
     mut kill_rx: oneshot::Receiver<oneshot::Sender<()>>,
-) -> std::io::Result<Option<podman::WFC>> {
-    match podman::create_pod(&prc.podman, &prc.node_name, prc.node_ip, pod).await? {
-        Some(pod_state) => {
-            tracing::info!(name=pod_state.name, address=?pod_state.address, "created pod");
-            create_pod_dns_record(&prc.etcd, prc.node_lease, &pod_state).await;
+) -> std::io::Result<Option<containers::WFC>> {
+    match containers::create_pod(&prc.containers, prc.node_ip, pod).await? {
+        Some(running_pod) => {
+            tracing::info!(name=running_pod.name, address=?running_pod.address, "created pod");
+            create_pod_dns_record(&prc.etcd, prc.node_lease, &running_pod).await;
 
             for container in &pod.spec.containers {
-                if !podman::start_container(&prc.podman, &pod_state, container).await? {
-                    delete_pod_dns_record(&prc.etcd, &pod_state).await;
-                    podman::terminate_pod(&prc.podman, &pod_state).await?;
+                if !containers::start_container(&prc.containers, &running_pod, container).await? {
+                    delete_pod_dns_record(&prc.etcd, &running_pod).await;
+                    containers::terminate_pod(&prc.containers, &running_pod).await?;
                     return Ok(None);
                 }
             }
 
-            let wfc = podman::wait_for_containers(&prc.podman, &pod_state, &mut kill_rx).await?;
-            delete_pod_dns_record(&prc.etcd, &pod_state).await;
-            podman::terminate_pod(&prc.podman, &pod_state).await?;
+            let wfc = containers::wait(&prc.containers, &running_pod, &mut kill_rx).await?;
+            delete_pod_dns_record(&prc.etcd, &running_pod).await;
+            containers::terminate_pod(&prc.containers, &running_pod).await?;
             Ok(Some(wfc))
         }
         None => Ok(None),
@@ -267,14 +264,14 @@ async fn run_and_wait_for_pod(
 async fn create_pod_dns_record(
     etcd_config: &etcd::Config,
     lease_id: LeaseId,
-    pod_state: &podman::PodState,
+    running_pod: &containers::RunningPod,
 ) {
     while let Err(error) = dns::create_leased_a_record(
         etcd_config,
         lease_id,
         &dns::Namespace::Pod,
-        &pod_state.hostname,
-        pod_state.address,
+        &running_pod.hostname,
+        running_pod.address,
     )
     .await
     {
@@ -286,9 +283,9 @@ async fn create_pod_dns_record(
 /// Delete the key for the DNS record of the pod, retrying until it succeeds.
 ///
 /// TODO: add a retry limit
-async fn delete_pod_dns_record(etcd_config: &etcd::Config, pod_state: &podman::PodState) {
+async fn delete_pod_dns_record(etcd_config: &etcd::Config, running_pod: &containers::RunningPod) {
     while let Err(error) =
-        dns::delete_record(etcd_config, &dns::Namespace::Pod, &pod_state.hostname).await
+        dns::delete_record(etcd_config, &dns::Namespace::Pod, &running_pod.hostname).await
     {
         tracing::warn!(?error, "could not destroy DNS record, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
