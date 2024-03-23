@@ -132,11 +132,12 @@ in
     # start apid and schedulerd on `infra`, workerd on `node1` and `node2`
     infra.systemctl("start thing-doer-apid")
     infra.systemctl("start thing-doer-schedulerd")
-    node1.systemctl("start thing-doer-workerd")
-    node2.systemctl("start thing-doer-workerd")
-
     infra.wait_for_unit("thing-doer-apid")
     infra.wait_for_unit("thing-doer-schedulerd")
+
+    # TODO: there is a race condition where concurrent workerd / schedulerd startup can lead to schedulerd missing state
+    node1.systemctl("start thing-doer-workerd")
+    node2.systemctl("start thing-doer-workerd")
     node1.wait_for_unit("thing-doer-workerd")
     node2.wait_for_unit("thing-doer-workerd")
 
@@ -234,9 +235,8 @@ in
     node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
     node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
 
-    # TODO - these do not work yet, change `succeed` to `fail` once filter rules are in place
     # nginx-8080 is not accessible over port 80
-    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
-    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    node1.fail("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    node2.fail("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
   '';
 }

@@ -228,19 +228,42 @@ pub async fn terminate_pod(
 pub async fn initialise_iptables(config: &Config, my_name: &str) -> std::io::Result<()> {
     let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
 
-    let mut create_nat_chain_cmd = config.iptables();
-    create_nat_chain_cmd.args(["-t", "nat", "-N", &chain_name]);
-
-    let mut prerouting_jump_cmd = config.iptables();
-    prerouting_jump_cmd.args(["-t", "nat", "-A", "PREROUTING", "-j", &chain_name]);
-
-    let mut output_jump_cmd = config.iptables();
-    output_jump_cmd.args(["-t", "nat", "-A", "OUTPUT", "-j", &chain_name]);
-
     // TODO: handle exit failure
-    let _ = create_nat_chain_cmd.spawn()?.wait().await?;
-    let _ = prerouting_jump_cmd.spawn()?.wait().await?;
-    let _ = output_jump_cmd.spawn()?.wait().await?;
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-N", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-A", "PREROUTING", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-A", "OUTPUT", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-N", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-I", "FORWARD", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-I", "OUTPUT", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
 
     Ok(())
 }
@@ -249,23 +272,54 @@ pub async fn initialise_iptables(config: &Config, my_name: &str) -> std::io::Res
 pub async fn teardown_iptables(config: &Config, my_name: &str) -> std::io::Result<()> {
     let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
 
-    let mut detach_prerouting_cmd = config.iptables();
-    detach_prerouting_cmd.args(["-t", "nat", "-D", "PREROUTING", "-j", &chain_name]);
-
-    let mut detach_output_cmd = config.iptables();
-    detach_output_cmd.args(["-t", "nat", "-D", "OUTPUT", "-j", &chain_name]);
-
-    let mut purge_cmd = config.iptables();
-    purge_cmd.args(["-t", "nat", "-F", &chain_name]);
-
-    let mut delete_cmd = config.iptables();
-    delete_cmd.args(["-t", "nat", "-X", &chain_name]);
-
     // TODO: handle exit failure
-    let _ = detach_prerouting_cmd.spawn()?.wait().await?;
-    let _ = detach_output_cmd.spawn()?.wait().await?;
-    let _ = purge_cmd.spawn()?.wait().await?;
-    let _ = delete_cmd.spawn()?.wait().await?;
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-D", "PREROUTING", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-D", "OUTPUT", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-F", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "nat", "-X", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-D", "FORWARD", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-D", "OUTPUT", "-j", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-F", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
+
+    {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-X", &chain_name]);
+        let _ = cmd.spawn()?.wait().await?;
+    }
 
     Ok(())
 }
@@ -279,11 +333,17 @@ async fn create_pod_iptables_rules(
 ) -> std::io::Result<()> {
     let chain_name = config.iptables_chain.clone().unwrap_or(my_name.to_string());
 
-    // TODO: add a default filter rule forbidding all ports and specific filter
-    // rules allowing the configured cluster ports.
     for rule in generate_nat_rules(address, ports) {
         let mut cmd = config.iptables();
         cmd.args(["-t", "nat", "-A", &chain_name]);
+        cmd.args(rule);
+
+        // TODO: handle exit failure
+        let _ = cmd.spawn()?.wait().await?;
+    }
+    for rule in generate_filter_rules(address, ports) {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-A", &chain_name]);
         cmd.args(rule);
 
         // TODO: handle exit failure
@@ -304,6 +364,14 @@ async fn delete_pod_iptables_rules(
     for rule in generate_nat_rules(pod_state.address, &pod_state.ports) {
         let mut cmd = config.iptables();
         cmd.args(["-t", "nat", "-D", &chain_name]);
+        cmd.args(rule);
+
+        // TODO: handle exit failure
+        let _ = cmd.spawn()?.wait().await?;
+    }
+    for rule in generate_filter_rules(pod_state.address, &pod_state.ports) {
+        let mut cmd = config.iptables();
+        cmd.args(["-t", "filter", "-D", &chain_name]);
         cmd.args(rule);
 
         // TODO: handle exit failure
@@ -337,6 +405,58 @@ fn generate_nat_rules(address: Ipv4Addr, ports: &[PodPortSpec]) -> Vec<Vec<Strin
             ]);
         }
     }
+
+    out
+}
+
+/// Generate the filter rules for a set of port mappings.
+fn generate_filter_rules(address: Ipv4Addr, ports: &[PodPortSpec]) -> Vec<Vec<String>> {
+    let mut out = Vec::with_capacity(ports.len() + 1);
+
+    for port in ports {
+        let (container, cluster) = match port {
+            PodPortSpec::Expose(container) => (*container, None),
+            PodPortSpec::Map { container, cluster } => (*container, *cluster),
+        };
+
+        let mut args = vec![
+            "-d".to_string(),
+            format!("{address}/32"),
+            "-p".to_string(),
+            "tcp".to_string(),
+        ];
+        if let Some(exposed) = cluster {
+            args.append(&mut vec![
+                "-m".to_string(),
+                "conntrack".to_string(),
+                "--ctstate".to_string(),
+                "DNAT".to_string(),
+                "--ctorigdstport".to_string(),
+                format!("{exposed}"),
+                "--ctdir".to_string(),
+                "ORIGINAL".to_string(),
+            ]);
+        }
+        args.append(&mut vec![
+            "--dport".to_string(),
+            format!("{container}"),
+            "-j".to_string(),
+            "RETURN".to_string(),
+        ]);
+        out.push(args);
+    }
+
+    out.push(vec![
+        "-d".to_string(),
+        format!("{address}/32"),
+        "-m".to_string(),
+        "conntrack".to_string(),
+        "!".to_string(),
+        "--ctstate".to_string(),
+        "RELATED,ESTABLISHED".to_string(),
+        "-j".to_string(),
+        "REJECT".to_string(),
+    ]);
 
     out
 }
