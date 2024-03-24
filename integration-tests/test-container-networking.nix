@@ -165,5 +165,16 @@ in
     # nginx-8080 is not accessible over port 80
     node1.fail("podman exec node1-test1-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
     node2.fail("podman exec node2-test2-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+
+    # terminate pods
+    infra.succeed("apiclient delete pod nginx-80")
+    infra.succeed("apiclient delete pod nginx-8080")
+    infra.succeed("apiclient delete pod test1")
+    infra.succeed("apiclient delete pod test2")
+
+    node1.wait_until_fails("podman ps | grep nginx-80-run")
+    node2.wait_until_fails("podman ps | grep nginx-8080-run")
+    node1.wait_until_fails("podman ps | grep test1-run")
+    node2.wait_until_fails("podman ps | grep test2-run")
   '';
 }

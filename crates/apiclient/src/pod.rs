@@ -1,10 +1,10 @@
-use reqwest::blocking::Client;
 use reqwest::Url;
 use rust_decimal::Decimal;
-use std::process;
 
 use nodelib::resources::pod::*;
 use nodelib::util::random_name;
+
+use crate::resource;
 
 #[derive(Debug, clap::Args)]
 pub struct RunArgs {
@@ -96,22 +96,8 @@ pub fn cmd_run(apid_url: &Url, args: RunArgs) {
     )
     .with_state(PodState::Created);
 
-    let post_resources_url = apid_url.join("resources").unwrap();
-    match Client::new().post(post_resources_url).json(&pod).send() {
-        Ok(response) => {
-            if response.status().is_success() {
-                println!("{pod_name}", pod_name = pod.name);
-            } else {
-                eprintln!("status: {status}", status = response.status());
-                eprintln!("{body}", body = response.text().unwrap());
-                process::exit(1);
-            }
-        }
-        Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
-        }
-    }
+    resource::create_or_die_on_error(apid_url, &pod);
+    println!("{name}", name = pod.name);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

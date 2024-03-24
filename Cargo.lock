@@ -99,6 +99,8 @@ dependencies = [
  "nodelib",
  "reqwest",
  "rust_decimal",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
