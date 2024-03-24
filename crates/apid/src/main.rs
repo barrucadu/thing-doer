@@ -12,7 +12,7 @@ use apid::web;
 /// Add an alias record for the current host to `api.special.cluster.local.`
 pub static SPECIAL_HOSTNAME: &str = "api";
 
-/// thing-doer workerd.
+/// thing-doer apid.
 #[derive(Clone, Debug, Parser)]
 struct Args {
     /// Name of this instance, must be unique across the cluster.  If
