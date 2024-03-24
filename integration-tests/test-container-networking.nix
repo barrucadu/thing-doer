@@ -111,8 +111,6 @@ in
   };
 
   testScript = ''
-    import json
-
     start_all()
 
     # push docker containers to registry
@@ -141,101 +139,31 @@ in
     node2.wait_for_unit("thing-doer-workerd")
 
     # create pods - nginx:80 on `node1`, nginx:8080 on `node2`, curl on both
-    nginx_pod_on_port_80 = json.dumps({
-        "name": "nginx-80",
-        "type": "pod",
-        "state": "created",
-        "metadata": {},
-        "spec": {
-            "containers": [
-                {
-                    "name": "web",
-                    "image": "${nginxContainerFoo.name}",
-                }
-            ],
-            "ports": [80],
-            "schedulingConstraints": {
-                "mayBeScheduledOn": ["node1"],
-            }
-        }
-    })
-    nginx_pod_on_port_8080 = json.dumps({
-        "name": "nginx-8080",
-        "type": "pod",
-        "state": "created",
-        "metadata": {},
-        "spec": {
-            "containers": [
-                {
-                    "name": "web",
-                    "image": "${nginxContainerBar.name}",
-                }
-            ],
-            "ports": [{ "container": 80, "cluster": 8080 }],
-            "schedulingConstraints": {
-                "mayBeScheduledOn": ["node2"],
-            }
-        }
-    })
-    test_pod_on_node1 = json.dumps({
-        "name": "test1",
-        "type": "pod",
-        "state": "created",
-        "metadata": {},
-        "spec": {
-            "containers": [
-                {
-                    "name": "curl",
-                    "image": "${curlContainer.name}",
-                }
-            ],
-            "schedulingConstraints": {
-                "mayBeScheduledOn": ["node1"],
-            }
-        }
-    })
-    test_pod_on_node2 = json.dumps({
-        "name": "test2",
-        "type": "pod",
-        "state": "created",
-        "metadata": {},
-        "spec": {
-            "containers": [
-                {
-                    "name": "curl",
-                    "image": "${curlContainer.name}",
-                }
-            ],
-            "schedulingConstraints": {
-                "mayBeScheduledOn": ["node2"],
-            }
-        }
-    })
+    infra.succeed("apiclient run --may-be-scheduled-on=node1 --name=nginx-80 --publish=80 ${nginxContainerFoo.name}")
+    infra.succeed("apiclient run --may-be-scheduled-on=node1 --name=test1 ${curlContainer.name}")
 
-    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_80}' http://127.0.0.1/resources")
-    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{nginx_pod_on_port_8080}' http://127.0.0.1/resources")
-    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{test_pod_on_node1}' http://127.0.0.1/resources")
-    infra.succeed(f"curl --fail-with-body -XPOST -H 'content-type: application/json' -d '{test_pod_on_node2}' http://127.0.0.1/resources")
+    infra.succeed("apiclient run --may-be-scheduled-on=node2 --name=nginx-8080 --publish=8080:80 ${nginxContainerBar.name}")
+    infra.succeed("apiclient run --may-be-scheduled-on=node2 --name=test2 ${curlContainer.name}")
 
     # wait for pods to start
-    node1.wait_until_succeeds("podman ps | grep nginx-80-web")
-    node2.wait_until_succeeds("podman ps | grep nginx-8080-web")
+    node1.wait_until_succeeds("podman ps | grep nginx-80-run")
+    node2.wait_until_succeeds("podman ps | grep nginx-8080-run")
 
-    node1.wait_until_succeeds("podman ps | grep test1-curl")
-    node2.wait_until_succeeds("podman ps | grep test2-curl")
+    node1.wait_until_succeeds("podman ps | grep test1-run")
+    node2.wait_until_succeeds("podman ps | grep test2-run")
 
     # curl on `node1` can communicate with everything
-    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
-    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
-    node1.succeed("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
+    node1.succeed("podman exec node1-test1-run /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
+    node1.succeed("podman exec node1-test1-run /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
+    node1.succeed("podman exec node1-test1-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
 
     # curl on `node2` can communicate with everything
-    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
-    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
-    node2.succeed("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
+    node2.succeed("podman exec node2-test2-run /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
+    node2.succeed("podman exec node2-test2-run /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")
+    node2.succeed("podman exec node2-test2-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local:8080 | grep bar")
 
     # nginx-8080 is not accessible over port 80
-    node1.fail("podman exec node1-test1-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
-    node2.fail("podman exec node2-test2-curl /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    node1.fail("podman exec node1-test1-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
+    node2.fail("podman exec node2-test2-run /bin/curl --fail-with-body http://nginx-8080.pod.cluster.local")
   '';
 }
