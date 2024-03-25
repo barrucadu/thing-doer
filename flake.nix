@@ -23,9 +23,13 @@
         cargo = rustToolchain;
         rustc = rustToolchain;
       };
-      buildDeps = with pkgs; [
-        coreutils
+      buildInputs = with pkgs; [
+        openssl.dev
+      ];
+      nativeBuildInputs = with pkgs; [
         clang
+        coreutils
+        pkg-config
         protobuf
         rustToolchain
       ];
@@ -37,7 +41,8 @@
           mkApp = script: extraDeps: {
             type = "app";
             program = toString (pkgs.writeShellScript "script.sh" ''
-              PATH=${pkgs.lib.makeBinPath (buildDeps ++ extraDeps)}
+              export PKG_CONFIG_PATH=${pkgs.openssl.dev}/lib/pkgconfig
+              PATH=${pkgs.lib.makeBinPath (buildInputs ++ nativeBuildInputs ++ extraDeps)}
               ${pkgs.lib.fileContents script}
             '');
           };
@@ -57,13 +62,15 @@
         };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = buildDeps;
+        packages = buildInputs ++ nativeBuildInputs;
       };
 
       formatter.${system} = pkgs.nixpkgs-fmt;
 
       packages.${system} = {
         default = rustPlatform.buildRustPackage rec {
+          inherit buildInputs nativeBuildInputs;
+
           pname = "thing-doer";
           version = "0.0.0";
 
@@ -72,11 +79,10 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
-              "dns-resolver-0.1.0" = "sha256-U778lBHV8pWH3UbSDypOSAa9uoqBv9MTzve4r8Oo5Fg=";
+              "dns-resolver-0.1.0" = "sha256-xiKkgzH3My+8XIIpdLwcHdD1gxDj8/gY+ILZujOdq34=";
             };
           };
 
-          nativeBuildInputs = buildDeps;
           doCheck = false;
 
           meta = {

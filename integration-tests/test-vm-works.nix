@@ -25,6 +25,8 @@
 
     for ty in NODE_TYPES:
         machine.succeed(f"curl --fail-with-body http://127.0.0.1/resources/node.{ty}/{NODE_NAME}")
+        machine.succeed(f"apiclient get node.{ty} {NODE_NAME}")
+        machine.succeed(f"apiclient list node.{ty} | grep {NODE_NAME}")
 
     machine.succeed("curl --fail-with-body http://127.0.0.1/dns_aliases/special/api/api.node/machine")
     machine.succeed("curl --fail-with-body http://127.0.0.1/dns_aliases/special/dns/worker.node/machine")
