@@ -152,6 +152,11 @@ in
     node1.wait_until_succeeds("podman ps | grep test1-run")
     node2.wait_until_succeeds("podman ps | grep test2-run")
 
+    # DNS aliases have been created
+    infra.succeed("apiclient aliases api.special.cluster.local | grep infra.api.node.cluster.local")
+    infra.succeed("apiclient aliases dns.special.cluster.local | grep node1.worker.node.cluster.local")
+    infra.succeed("apiclient aliases dns.special.cluster.local | grep node2.worker.node.cluster.local")
+
     # curl on `node1` can communicate with everything
     node1.succeed("podman exec node1-test1-run /bin/curl --fail-with-body http://api.special.cluster.local/resources/pod")
     node1.succeed("podman exec node1-test1-run /bin/curl --fail-with-body http://nginx-80.pod.cluster.local | grep foo")

@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use reqwest::Url;
 
+use apiclient::dns_alias;
 use apiclient::pod;
 use apiclient::resource;
 
@@ -30,6 +31,12 @@ enum Command {
     Get(resource::IdentifyArgs),
     /// Delete a single resource.  If this is a running pod, it is killed.
     Delete(resource::IdentifyArgs),
+    /// List all DNS aliases from a given source name.
+    Aliases(dns_alias::ListArgs),
+    /// Create a DNS alias.
+    CreateAlias(dns_alias::IdentifyArgs),
+    /// Delete a DNS alias.
+    DeleteAlias(dns_alias::IdentifyArgs),
 }
 
 fn main() {
@@ -40,5 +47,8 @@ fn main() {
         Command::List(cmd_args) => resource::cmd_list(&args.apid_url, cmd_args),
         Command::Get(cmd_args) => resource::cmd_get(&args.apid_url, cmd_args),
         Command::Delete(cmd_args) => resource::cmd_delete(&args.apid_url, cmd_args),
+        Command::Aliases(cmd_args) => dns_alias::cmd_aliases(&args.apid_url, cmd_args),
+        Command::CreateAlias(cmd_args) => dns_alias::cmd_create_alias(&args.apid_url, cmd_args),
+        Command::DeleteAlias(cmd_args) => dns_alias::cmd_delete_alias(&args.apid_url, cmd_args),
     }
 }

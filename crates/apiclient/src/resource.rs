@@ -1,4 +1,4 @@
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Client;
 use reqwest::Url;
 use serde::Serialize;
 use serde_json::Value;
@@ -7,6 +7,8 @@ use std::io::BufReader;
 use std::process;
 
 use nodelib::resources::Resource;
+
+use crate::util::*;
 
 #[derive(Debug, clap::Args)]
 pub struct ApplyArgs {
@@ -125,23 +127,6 @@ pub fn create_or_die_on_error<T: Serialize>(apid_url: &Url, resource: &T) -> Str
         print_error(response);
         process::exit(1);
     }
-}
-
-/// If error, print it to stdout and terminate.
-fn reqwest_error<T>(r: reqwest::Result<T>) -> T {
-    match r {
-        Ok(t) => t,
-        Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-/// Print the response to stderr.
-fn print_error(response: Response) {
-    eprintln!("status: {status}", status = response.status());
-    eprintln!("{body}", body = response.text().unwrap());
 }
 
 /// URL to get, patch, or delete a single resource
