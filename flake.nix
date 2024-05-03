@@ -79,7 +79,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
-              "dns-resolver-0.1.0" = "sha256-z5SHjej3lGoGO8GpmXDi88yt+r8NuVIO4mqt6+SActg=";
+              "dns-resolver-0.1.0" = "sha256-gr8MiHzCS+VPq09VlpPpeZlSW63KJ5u/CB/OEhITnBY=";
             };
           };
 
